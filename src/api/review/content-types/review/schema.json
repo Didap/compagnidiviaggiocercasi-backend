@@ -1,0 +1,43 @@
+{
+    "kind": "collectionType",
+    "collectionName": "reviews",
+    "info": {
+        "singularName": "review",
+        "pluralName": "reviews",
+        "displayName": "Review",
+        "description": "Recensioni dei viaggi"
+    },
+    "options": {
+        "draftAndPublish": true
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "authorName": {
+            "type": "string",
+            "required": true
+        },
+        "rating": {
+            "type": "integer",
+            "required": true,
+            "min": 1,
+            "max": 5
+        },
+        "content": {
+            "type": "text"
+        },
+        "travelPeriod": {
+            "type": "string"
+        },
+        "trip": {
+            "type": "relation",
+            "relation": "manyToOne",
+            "target": "api::trip.trip",
+            "inversedBy": "reviews"
+        },
+        "user": {
+            "type": "relation",
+            "relation": "manyToOne",
+            "target": "plugin::users-permissions.user"
+        }
+    }
+}

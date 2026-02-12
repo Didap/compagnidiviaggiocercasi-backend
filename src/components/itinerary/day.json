@@ -1,0 +1,19 @@
+{
+    "collectionName": "components_itinerary_days",
+    "info": {
+        "displayName": "Day",
+        "icon": "calendar",
+        "description": "Giorno dell'itinerario"
+    },
+    "options": {},
+    "attributes": {
+        "title": {
+            "type": "string",
+            "required": true
+        },
+        "description": {
+            "type": "richtext",
+            "required": true
+        }
+    }
+}
