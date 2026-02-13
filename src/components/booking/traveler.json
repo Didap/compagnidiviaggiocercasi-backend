@@ -1,0 +1,32 @@
+{
+    "collectionName": "components_booking_travelers",
+    "info": {
+        "displayName": "Traveler",
+        "icon": "user",
+        "description": "Information about a traveler in a booking"
+    },
+    "options": {},
+    "attributes": {
+        "firstName": {
+            "type": "string",
+            "required": true
+        },
+        "lastName": {
+            "type": "string",
+            "required": true
+        },
+        "birthDate": {
+            "type": "date",
+            "required": true
+        },
+        "gender": {
+            "type": "enumeration",
+            "enum": [
+                "male",
+                "female",
+                "other"
+            ],
+            "required": true
+        }
+    }
+}
