@@ -11,9 +11,97 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
 
 export default factories.createCoreController('api::booking.booking', ({ strapi }) => ({
+    async update(ctx) {
+        const { id } = ctx.params;
+        const { data } = ctx.request.body;
+
+        // 1. Fetch current booking to know previous status and offer
+        const existingBooking = await strapi.documents('api::booking.booking').findOne({
+            documentId: id,
+            populate: ['offer', 'participants'],
+        });
+
+        if (!existingBooking) {
+            return ctx.notFound('Booking not found');
+        }
+
+        const previousStatus = existingBooking.status;
+        const newStatus = data.status;
+
+        // If status isn't changing, just do default update
+        if (!newStatus || newStatus === previousStatus) {
+            return super.update(ctx);
+        }
+
+        const offer = existingBooking.offer as any;
+        if (!offer) {
+            return ctx.badRequest('Booking has no associated offer');
+        }
+
+        // Calculate participants count
+        const participantsCount = (existingBooking.participants && existingBooking.participants.length > 0)
+            ? existingBooking.participants.length
+            : 1;
+
+        // LOGIC: Handling Seat Counts
+
+        // CASE A: Confirming a booking (pending -> confirmed)
+        if (newStatus === 'confirmed' && previousStatus !== 'confirmed') {
+            // Atomic check (in a perfect world we'd verify this in a transaction)
+            // Re-fetch offer to get latest seat count
+            const freshOffer = await strapi.documents('api::offer.offer').findOne({
+                documentId: offer.documentId,
+            });
+
+            if (freshOffer.occupiedSeats + participantsCount > freshOffer.maxParticipants) {
+                return ctx.badRequest('No seats available for this booking.');
+            }
+
+            // Increment seats
+            await strapi.documents('api::offer.offer').update({
+                documentId: offer.documentId,
+                data: {
+                    occupiedSeats: freshOffer.occupiedSeats + participantsCount,
+                },
+            });
+        }
+
+        // CASE B: Cancelling a confirmed booking (confirmed -> cancelled OR pending)
+        if (previousStatus === 'confirmed' && (newStatus === 'cancelled' || newStatus === 'pending')) {
+            // Decrement seats
+            const freshOffer = await strapi.documents('api::offer.offer').findOne({
+                documentId: offer.documentId,
+            });
+            await strapi.documents('api::offer.offer').update({
+                documentId: offer.documentId,
+                data: {
+                    occupiedSeats: Math.max(0, freshOffer.occupiedSeats - participantsCount),
+                },
+            });
+        }
+
+        // Proceed with standard update
+        return super.update(ctx);
+    },
+
     async create(ctx) {
-        // 1. Create the booking using the core logic (status will be 'pending' by default)
+        // 0. Enforce 'pending' status BEFORE validation/creation
+        if (!ctx.request.body.data) {
+            ctx.request.body.data = {};
+        }
+
+        // Force status to pending regardless of what frontend sends
+        ctx.request.body.data.status = 'pending';
+
+        // Calculate participants count for metadata (Optional, but good for logs)
+        const participantsPayload = ctx.request.body.data.participants;
+        const participantsCount = (Array.isArray(participantsPayload) && participantsPayload.length > 0)
+            ? participantsPayload.length
+            : 1;
+
+        // 1. Create the booking using the core logic (status will be 'pending')
         const response = await super.create(ctx);
+
         // Helper to get documentId whether it's in data.documentId or nested
         const bookingDocId = response.data.documentId || response.data.id; // Fallback, but prefer documentId
         const bookingId = response.data.id;
@@ -26,10 +114,6 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             populate: ['offer', 'offer.trip', 'participants'],
         });
 
-
-
-
-
         if (!booking || !booking.offer) {
             return ctx.badRequest('Booking created but offer not found.');
         }
@@ -40,10 +124,6 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
         const depositPrice = offer.depositPrice;
         // Trip title retrieval
         const tripTitle = offer.trip?.title || 'Viaggio';
-
-
-        const payloadData = ctx.request.body.data || {};
-        const participantsCount = Array.isArray(payloadData.participants) ? payloadData.participants.length : (booking.participants?.length || 1);
 
         // 3. Create Stripe Checkout Session
         try {

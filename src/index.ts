@@ -17,7 +17,7 @@ export default {
         const bookings = await strapi.documents('api::booking.booking').findMany({
           filters: {
             offer: { documentId: offerDocId },
-            status: { $ne: 'cancelled' },
+            status: 'confirmed',
           },
           populate: ['participants'],
           status: 'draft',
@@ -137,14 +137,24 @@ export default {
       async afterUpdate(event) {
         const { result } = event;
         // Similar logic: fetch booking to get offer ID
+        // console.log('[Global Lifecycle] afterUpdate triggered for Booking:', result?.documentId);
+
         if (result && result.documentId) {
-          const booking = await strapi.documents('api::booking.booking').findOne({
-            documentId: result.documentId,
-            populate: ['offer'],
-            status: 'draft'
-          });
-          if (booking?.offer?.documentId) {
-            await recalculateOccupiedSeats(booking.offer.documentId);
+          try {
+            const booking = await strapi.documents('api::booking.booking').findOne({
+              documentId: result.documentId,
+              populate: ['offer'],
+              status: 'draft'
+            });
+
+            if (booking?.offer?.documentId) {
+              console.log(`[Global Lifecycle] Booking ${result.documentId} updated. Recalculating seats for Offer ${booking.offer.documentId}`);
+              await recalculateOccupiedSeats(booking.offer.documentId);
+            } else {
+              console.log(`[Global Lifecycle] Booking ${result.documentId} updated but no offer found.`);
+            }
+          } catch (err) {
+            console.error('[Global Lifecycle] Error in afterUpdate:', err);
           }
         }
       },
