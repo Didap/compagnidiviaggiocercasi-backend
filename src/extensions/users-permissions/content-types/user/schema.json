@@ -86,6 +86,12 @@
     },
     "phone": {
       "type": "string"
+    },
+    "trip_proposals": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::trip-proposal.trip-proposal",
+      "mappedBy": "user"
     }
   }
 }

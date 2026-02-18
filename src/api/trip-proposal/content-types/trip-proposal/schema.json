@@ -1,0 +1,50 @@
+{
+    "kind": "collectionType",
+    "collectionName": "trip_proposals",
+    "info": {
+        "singularName": "trip-proposal",
+        "pluralName": "trip-proposals",
+        "displayName": "Trip Proposal",
+        "description": "Proposte di viaggio degli utenti"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "destination": {
+            "type": "string",
+            "required": true
+        },
+        "description": {
+            "type": "text",
+            "required": true
+        },
+        "budget": {
+            "type": "decimal"
+        },
+        "preferredPeriod": {
+            "type": "string"
+        },
+        "wantsToCoordinate": {
+            "type": "boolean",
+            "default": false
+        },
+        "status": {
+            "type": "enumeration",
+            "enum": [
+                "pending",
+                "reviewed",
+                "accepted",
+                "rejected"
+            ],
+            "default": "pending"
+        },
+        "user": {
+            "type": "relation",
+            "relation": "manyToOne",
+            "target": "plugin::users-permissions.user",
+            "inversedBy": "trip_proposals"
+        }
+    }
+}

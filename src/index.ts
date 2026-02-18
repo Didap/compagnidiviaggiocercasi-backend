@@ -188,5 +188,109 @@ export default {
         }
       }
     });
+
+    // Newsletter Lifecycle
+    strapi.db.lifecycles.subscribe({
+      models: ['api::newsletter-registration.newsletter-registration'],
+
+      async afterCreate(event) {
+        const { result } = event;
+        try {
+          if (result && result.email) {
+            await strapi.plugin('email').service('email').send({
+              to: result.email,
+              from: process.env.RESEND_FROM_EMAIL || 'info@compagnidiviaggiocercasi.it',
+              subject: 'Benvenuto nel Journal di Compagni di Viaggio!',
+              html: `
+                <div style="font-family: sans-serif; color: #333;">
+                  <h1>Benvenuto a bordo! 🌍</h1>
+                  <p>Grazie per esserti iscritto al nostro Journal.</p>
+                  <p>Riceverai presto ispirazioni, consigli di viaggio e le nostre migliori offerte.</p>
+                  <br>
+                  <p>A presto,</p>
+                  <p>Il team di Compagni di Viaggio Cercasi</p>
+                </div>
+              `,
+            });
+            console.log(`[Newsletter] Welcome email sent to ${result.email}`);
+          }
+        } catch (err) {
+          console.error('[Newsletter] Failed to send welcome email:', err);
+        }
+      }
+    });
+
+    // Auto-configure permissions
+    const configurePermissions = async () => {
+      try {
+        console.log('[Bootstrap] Configuring permissions...');
+
+        const roles = await strapi.documents('plugin::users-permissions.role').findMany({
+          filters: { type: { $in: ['authenticated', 'public'] } }
+        });
+
+        const authenticatedRole = roles.find((r: any) => r.type === 'authenticated');
+        const publicRole = roles.find((r: any) => r.type === 'public');
+
+        // Helper to add permission if missing using Query Engine
+        const addPermission = async (roleId: number, action: string) => {
+          const existing = await strapi.db.query('plugin::users-permissions.permission').findOne({
+            where: {
+              action,
+              role: roleId
+            }
+          });
+
+          if (!existing) {
+            console.log(`[Bootstrap] Adding permission ${action} to role ${roleId}`);
+            await strapi.db.query('plugin::users-permissions.permission').create({
+              data: {
+                action,
+                role: roleId
+              }
+            });
+          }
+        };
+
+        // Consolidate permissions
+        const publicPermissions = [
+          'api::trip.trip.find', 'api::trip.trip.findOne',
+          'api::offer.offer.find', 'api::offer.offer.findOne',
+          'api::post.post.find', 'api::post.post.findOne',
+          'api::review.review.find', 'api::review.review.findOne',
+          'api::newsletter-registration.newsletter-registration.create', // Public newsletter
+          'plugin::upload.content-api.find', // Images
+          // 'plugin::users-permissions.auth.callback', // Login (handled by plugin default)
+          // 'plugin::users-permissions.auth.register' // Register
+        ];
+
+        const authenticatedPermissions = [
+          ...publicPermissions,
+          'api::booking.booking.create', 'api::booking.booking.find', 'api::booking.booking.findOne', 'api::booking.booking.update',
+          'api::trip-proposal.trip-proposal.create', 'api::trip-proposal.trip-proposal.find', 'api::trip-proposal.trip-proposal.findOne',
+          'api::review.review.create',
+          'plugin::users-permissions.user.findOne', 'plugin::users-permissions.user.update'
+        ];
+
+        if (publicRole) {
+          console.log('[Bootstrap] Setting public permissions...');
+          for (const action of publicPermissions) {
+            await addPermission(publicRole.id, action);
+          }
+        }
+
+        if (authenticatedRole) {
+          console.log('[Bootstrap] Setting authenticated permissions...');
+          for (const action of authenticatedPermissions) {
+            await addPermission(authenticatedRole.id, action);
+          }
+        }
+
+      } catch (error) {
+        console.warn('[Bootstrap] Failed to auto-configure permissions:', error);
+      }
+    };
+
+    configurePermissions();
   },
 };

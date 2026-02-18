@@ -1,0 +1,21 @@
+{
+    "kind": "collectionType",
+    "collectionName": "newsletter_registrations",
+    "info": {
+        "singularName": "newsletter-registration",
+        "pluralName": "newsletter-registrations",
+        "displayName": "Newsletter Registration",
+        "description": "List of emails subscribed to the newsletter"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "email": {
+            "type": "email",
+            "required": true,
+            "unique": true
+        }
+    }
+}

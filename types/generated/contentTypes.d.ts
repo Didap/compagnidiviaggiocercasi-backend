@@ -472,6 +472,38 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiNewsletterRegistrationNewsletterRegistration
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'newsletter_registrations';
+  info: {
+    description: 'List of emails subscribed to the newsletter';
+    displayName: 'Newsletter Registration';
+    pluralName: 'newsletter-registrations';
+    singularName: 'newsletter-registration';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    email: Schema.Attribute.Email &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::newsletter-registration.newsletter-registration'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
   collectionName: 'offers';
   info: {
@@ -586,6 +618,49 @@ export interface ApiReviewReview extends Struct.CollectionTypeSchema {
       'manyToOne',
       'plugin::users-permissions.user'
     >;
+  };
+}
+
+export interface ApiTripProposalTripProposal
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'trip_proposals';
+  info: {
+    description: 'Proposte di viaggio degli utenti';
+    displayName: 'Trip Proposal';
+    pluralName: 'trip-proposals';
+    singularName: 'trip-proposal';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    budget: Schema.Attribute.Decimal;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    description: Schema.Attribute.Text & Schema.Attribute.Required;
+    destination: Schema.Attribute.String & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::trip-proposal.trip-proposal'
+    > &
+      Schema.Attribute.Private;
+    preferredPeriod: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    status: Schema.Attribute.Enumeration<
+      ['pending', 'reviewed', 'accepted', 'rejected']
+    > &
+      Schema.Attribute.DefaultTo<'pending'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    user: Schema.Attribute.Relation<
+      'manyToOne',
+      'plugin::users-permissions.user'
+    >;
+    wantsToCoordinate: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
   };
 }
 
@@ -1119,6 +1194,10 @@ export interface PluginUsersPermissionsUser
       'manyToOne',
       'plugin::users-permissions.role'
     >;
+    trip_proposals: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::trip-proposal.trip-proposal'
+    >;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1143,9 +1222,11 @@ declare module '@strapi/strapi' {
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
       'api::booking.booking': ApiBookingBooking;
+      'api::newsletter-registration.newsletter-registration': ApiNewsletterRegistrationNewsletterRegistration;
       'api::offer.offer': ApiOfferOffer;
       'api::post.post': ApiPostPost;
       'api::review.review': ApiReviewReview;
+      'api::trip-proposal.trip-proposal': ApiTripProposalTripProposal;
       'api::trip.trip': ApiTripTrip;
       'plugin::content-releases.release': PluginContentReleasesRelease;
       'plugin::content-releases.release-action': PluginContentReleasesReleaseAction;
