@@ -442,6 +442,11 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    bookingStatus: Schema.Attribute.Enumeration<
+      ['pending', 'confirmed', 'cancelled']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'pending'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -455,12 +460,14 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     notes: Schema.Attribute.Text;
     offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'>;
     participants: Schema.Attribute.Component<'booking.traveler', true>;
-    publishedAt: Schema.Attribute.DateTime;
-    status: Schema.Attribute.Enumeration<
-      ['pending', 'confirmed', 'cancelled']
+    paymentOption: Schema.Attribute.Enumeration<
+      ['full', 'deposit', 'installments']
     > &
-      Schema.Attribute.Required &
-      Schema.Attribute.DefaultTo<'pending'>;
+      Schema.Attribute.DefaultTo<'deposit'>;
+    paymentSteps: Schema.Attribute.Component<'booking.payment-step', true>;
+    publishedAt: Schema.Attribute.DateTime;
+    requestInvoice: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
     totalPrice: Schema.Attribute.Decimal & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -516,11 +523,18 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    allowInstallments: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     depositPrice: Schema.Attribute.Decimal & Schema.Attribute.Required;
     endDate: Schema.Attribute.Date & Schema.Attribute.Required;
+    installmentConfigs: Schema.Attribute.Component<
+      'booking.installment-config',
+      true
+    >;
+    installmentsCount: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<3>;
     itinerary: Schema.Attribute.Component<'itinerary.day', true>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::offer.offer'> &

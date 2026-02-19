@@ -12,7 +12,7 @@
     },
     "pluginOptions": {},
     "attributes": {
-        "status": {
+        "bookingStatus": {
             "type": "enumeration",
             "enum": [
                 "pending",
@@ -47,6 +47,24 @@
             "type": "relation",
             "relation": "manyToOne",
             "target": "api::offer.offer"
+        },
+        "requestInvoice": {
+            "type": "boolean",
+            "default": false
+        },
+        "paymentOption": {
+            "type": "enumeration",
+            "enum": [
+                "full",
+                "deposit",
+                "installments"
+            ],
+            "default": "deposit"
+        },
+        "paymentSteps": {
+            "type": "component",
+            "repeatable": true,
+            "component": "booking.payment-step"
         }
     }
 }

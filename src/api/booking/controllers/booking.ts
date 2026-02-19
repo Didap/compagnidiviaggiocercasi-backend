@@ -25,8 +25,8 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             return ctx.notFound('Booking not found');
         }
 
-        const previousStatus = existingBooking.status;
-        const newStatus = data.status;
+        const previousStatus = existingBooking.bookingStatus;
+        const newStatus = data.bookingStatus;
 
         // If status isn't changing, just do default update
         if (!newStatus || newStatus === previousStatus) {
@@ -90,68 +90,262 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             ctx.request.body.data = {};
         }
 
-        // Force status to pending regardless of what frontend sends
-        ctx.request.body.data.status = 'pending';
+        ctx.request.body.data.bookingStatus = 'pending';
 
-        // Calculate participants count for metadata (Optional, but good for logs)
+        // Preserve flags from request
+        const requestInvoice = ctx.request.body.data.requestInvoice === true;
+        ctx.request.body.data.requestInvoice = requestInvoice;
+
+        const paymentOption = ctx.request.body.data.paymentOption || 'deposit';
+        ctx.request.body.data.paymentOption = paymentOption;
+
+        console.log(`[Create Booking] paymentOption: ${paymentOption}, requestInvoice: ${requestInvoice}`);
+
+        // Participants count
         const participantsPayload = ctx.request.body.data.participants;
         const participantsCount = (Array.isArray(participantsPayload) && participantsPayload.length > 0)
             ? participantsPayload.length
             : 1;
 
-        // 1. Create the booking using the core logic (status will be 'pending')
+        // 1. Create the booking (status = 'pending')
         const response = await super.create(ctx);
 
-        // Helper to get documentId whether it's in data.documentId or nested
-        const bookingDocId = response.data.documentId || response.data.id; // Fallback, but prefer documentId
+        const bookingDocId = response.data.documentId || response.data.id;
         const bookingId = response.data.id;
+        console.log(`[Create Booking] Created Booking ID: ${bookingId}, DocID: ${bookingDocId}`);
 
-        console.log(`[Create Booking] Created Booking ID: ${bookingId}, Document ID: ${bookingDocId}`);
-
-        // 2. Fetch the newly created booking with its relations to get the offer details
+        // 2. Fetch booking with relations (include installmentConfigs)
         const booking = await strapi.documents('api::booking.booking').findOne({
             documentId: bookingDocId,
-            populate: ['offer', 'offer.trip', 'participants'],
+            populate: ['offer', 'offer.trip', 'offer.installmentConfigs', 'participants', 'user'],
         });
 
         if (!booking || !booking.offer) {
             return ctx.badRequest('Booking created but offer not found.');
         }
 
-        // In Strapi v5, relations via populate are returned as objects.
-        // We cast to any to avoid strict type checks for now, or we should import types.
         const offer = booking.offer as any;
-        const depositPrice = offer.depositPrice;
-        // Trip title retrieval
+        const totalPricePerPerson = Number(offer.price);
+        const depositPerPerson = Number(offer.depositPrice);
         const tripTitle = offer.trip?.title || 'Viaggio';
+        const totalPrice = (totalPricePerPerson + depositPerPerson) * participantsCount;
+        const totalDeposit = depositPerPerson * participantsCount;
 
-        // 3. Create Stripe Checkout Session
+        // 3a. Check Booking Deadline (30 days)
+        if (offer.startDate) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const start = new Date(offer.startDate);
+            start.setHours(0, 0, 0, 0);
+            const diffTime = start.getTime() - today.getTime();
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+            if (diffDays < 30) {
+                // Determine if we should delete the pending booking since it's invalid
+                // Ideally, yes, to keep DB clean.
+                await strapi.documents('api::booking.booking').delete({ documentId: bookingDocId });
+                return ctx.badRequest('Le prenotazioni per questo viaggio sono chiuse (meno di 30 giorni alla partenza).');
+            }
+        }
+
+        // 3. Generate payment steps based on paymentOption
+        let paymentSteps: any[] = [];
+        let firstStepAmount = 0;
+        let firstStepName = '';
+
+        if (paymentOption === 'full') {
+            // Single step: full price
+            firstStepAmount = totalPrice;
+            firstStepName = 'Pagamento totale';
+            paymentSteps = [
+                { name: 'Pagamento totale', amount: totalPrice, status: 'pending' },
+            ];
+        } else if (paymentOption === 'installments' && offer.allowInstallments) {
+            const configs = offer.installmentConfigs;
+            // Installments apply only to the price (excluding deposit)
+            const totalPriceOnly = totalPricePerPerson * participantsCount;
+
+            // Step 0: Acconto (deposit) — always paid immediately
+            paymentSteps.push({
+                name: 'Acconto',
+                amount: totalDeposit,
+                status: 'pending',
+            });
+
+            if (Array.isArray(configs) && configs.length > 0) {
+                // --- Admin-defined percentage-based installment schedule ---
+                const startDate = offer.startDate ? new Date(offer.startDate) : null;
+
+                // Resolve due dates and validate first one
+                const resolvedConfigs = configs.map((cfg: any) => {
+                    let resolvedDueDate: Date | null = null;
+                    if (cfg.dueDateType === 'relative' && startDate && cfg.relativeMonths) {
+                        resolvedDueDate = new Date(startDate);
+                        resolvedDueDate.setMonth(resolvedDueDate.getMonth() - cfg.relativeMonths);
+                    } else if (cfg.dueDate) {
+                        resolvedDueDate = new Date(cfg.dueDate);
+                    }
+                    return { ...cfg, resolvedDueDate };
+                });
+
+                // Validate: first due date must not be in the past
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const firstResolved = resolvedConfigs[0]?.resolvedDueDate;
+                if (firstResolved) {
+                    firstResolved.setHours(0, 0, 0, 0);
+                    if (firstResolved.getTime() < today.getTime()) {
+                        await strapi.documents('api::booking.booking').delete({ documentId: bookingDocId });
+                        return ctx.badRequest('Il pagamento a rate non è più disponibile per questa offerta (scadenza prima rata superata).');
+                    }
+                }
+
+                // Map configs to installment steps using percentage on PRICE ONLY
+                // If evenly divisible, use clean division; otherwise percentage-based
+                const numInstallments = resolvedConfigs.length;
+                const isEvenlyDivisible = totalPriceOnly % numInstallments === 0;
+
+                if (isEvenlyDivisible) {
+                    const evenAmount = totalPriceOnly / numInstallments;
+                    for (let i = 0; i < resolvedConfigs.length; i++) {
+                        const cfg = resolvedConfigs[i];
+                        const dueDateStr = cfg.resolvedDueDate ? cfg.resolvedDueDate.toISOString().split('T')[0] : null;
+                        paymentSteps.push({
+                            name: cfg.name || `Rata ${i + 1} di ${numInstallments}`,
+                            amount: evenAmount,
+                            dueDate: dueDateStr,
+                            status: 'pending',
+                        });
+                    }
+                } else {
+                    let usedSum = 0;
+                    for (let i = 0; i < resolvedConfigs.length; i++) {
+                        const cfg = resolvedConfigs[i];
+                        const percentage = Number(cfg.percentage) || 0;
+                        const isLast = i === resolvedConfigs.length - 1;
+                        const stepAmount = isLast
+                            ? Math.round((totalPriceOnly - usedSum) * 100) / 100
+                            : Math.round((totalPriceOnly * percentage / 100) * 100) / 100;
+                        if (!isLast) usedSum += stepAmount;
+                        const dueDateStr = cfg.resolvedDueDate ? cfg.resolvedDueDate.toISOString().split('T')[0] : null;
+                        paymentSteps.push({
+                            name: cfg.name || `Rata ${i + 1} di ${numInstallments}`,
+                            amount: stepAmount,
+                            dueDate: dueDateStr,
+                            status: 'pending',
+                        });
+                    }
+                }
+            } else {
+                // --- Fallback: equal-split installments on price only ---
+                const count = offer.installmentsCount || 3;
+                const isEvenlyDivisible = totalPriceOnly % count === 0;
+                const evenAmount = totalPriceOnly / count;
+
+                if (isEvenlyDivisible) {
+                    for (let i = 0; i < count; i++) {
+                        paymentSteps.push({
+                            name: `Rata ${i + 1} di ${count}`,
+                            amount: evenAmount,
+                            status: 'pending',
+                        });
+                    }
+                } else {
+                    const installmentAmount = Math.floor(evenAmount * 100) / 100;
+                    let fallbackSum = 0;
+                    for (let i = 0; i < count; i++) {
+                        const isLast = i === count - 1;
+                        const stepAmount = isLast
+                            ? Math.round((totalPriceOnly - fallbackSum) * 100) / 100
+                            : installmentAmount;
+                        if (!isLast) fallbackSum += stepAmount;
+                        paymentSteps.push({
+                            name: `Rata ${i + 1} di ${count}`,
+                            amount: stepAmount,
+                            status: 'pending',
+                        });
+                    }
+                }
+            }
+            // First step is always the Acconto (deposit)
+            firstStepAmount = paymentSteps[0].amount;
+            firstStepName = paymentSteps[0].name;
+        } else {
+            // Default: deposit now, balance later
+            const balance = totalPrice - totalDeposit;
+            firstStepAmount = totalDeposit;
+            firstStepName = 'Acconto';
+            paymentSteps = [
+                { name: 'Acconto', amount: totalDeposit, status: 'pending' },
+                { name: 'Saldo', amount: balance, status: 'pending' },
+            ];
+        }
+
+        console.log(`[Create Booking] Generated ${paymentSteps.length} payment steps. First: "${firstStepName}" = €${firstStepAmount}`);
+
+        // 4. Save payment steps to the booking
+        await strapi.documents('api::booking.booking').update({
+            documentId: bookingDocId,
+            data: {
+                paymentSteps,
+            } as any,
+        });
+
+        // 5. Create Stripe Checkout Session for the FIRST step only
         try {
-            const session = await stripe.checkout.sessions.create({
+            const hasRequestedInvoice = requestInvoice;
+            console.log(`[Create Booking] Invoice requested: ${hasRequestedInvoice}`);
+
+            const sessionOptions: Stripe.Checkout.SessionCreateParams = {
                 payment_method_types: ['card'],
                 line_items: [
                     {
                         price_data: {
                             currency: 'eur',
                             product_data: {
-                                name: `Acconto per: ${tripTitle}`,
+                                name: `${firstStepName} per: ${tripTitle}`,
                                 description: `Prenotazione #${bookingId} - ${participantsCount} partecipanti`,
                             },
-                            unit_amount: Math.round(Number(depositPrice) * 100), // Unit price from offer
+                            unit_amount: Math.round(firstStepAmount * 100),
                         },
-                        quantity: participantsCount,
+                        quantity: 1,
                     },
                 ],
                 mode: 'payment',
                 success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/prenotazione/successo?session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/prenotazione/annullato?offer_id=${offer.documentId}`,
                 metadata: {
-                    booking_id: bookingDocId, // Use documentId for consistency
+                    booking_id: bookingDocId,
                     offer_id: offer.documentId,
+                    payment_step_index: '0',
+                    request_invoice: hasRequestedInvoice ? 'true' : 'false',
                 },
+            };
+
+            // Invoice + tax options
+            if (hasRequestedInvoice) {
+                console.log('[Create Booking] Configuring Stripe session for Invoice, Tax ID and Billing Address');
+                sessionOptions.tax_id_collection = { enabled: true };
+                sessionOptions.billing_address_collection = 'required';
+                sessionOptions.invoice_creation = { enabled: true };
+                if ((booking as any).user?.email) {
+                    sessionOptions.customer_email = (booking as any).user.email;
+                }
+            }
+
+            const session = await stripe.checkout.sessions.create(sessionOptions);
+            console.log(`[Create Booking] Stripe Session Created: ${session.id}`);
+
+            // Save Stripe session ID to the first payment step
+            const updatedSteps = [...paymentSteps];
+            updatedSteps[0].stripeSessionId = session.id;
+            await strapi.documents('api::booking.booking').update({
+                documentId: bookingDocId,
+                data: {
+                    paymentSteps: updatedSteps,
+                } as any,
             });
 
-            // 4. Return the checkout URL along with the booking data
             return {
                 ...response,
                 meta: {
@@ -159,12 +353,108 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                     checkoutUrl: session.url,
                 },
             };
-
         } catch (error) {
             console.error('Stripe Session Error:', error);
-            // If Stripe fails, we might want to delete the pending booking or keep it?
-            // For now, let's keep it but return error.
             return ctx.internalServerError('Could not create Stripe session.');
+        }
+    },
+
+    /**
+     * POST /api/bookings/:id/payment-session
+     * Creates a Stripe Checkout Session for a specific pending payment step.
+     */
+    async createPaymentSession(ctx) {
+        const { id: bookingDocId } = ctx.params;
+        const { stepIndex } = ctx.request.body;
+
+        if (stepIndex === undefined || stepIndex === null) {
+            return ctx.badRequest('stepIndex is required');
+        }
+
+        // 1. Fetch booking with relations
+        const booking = await strapi.documents('api::booking.booking').findOne({
+            documentId: bookingDocId,
+            populate: ['offer', 'offer.trip', 'paymentSteps', 'user'],
+        });
+
+        if (!booking) {
+            return ctx.notFound('Booking not found');
+        }
+
+        // 2. Verify ownership
+        const currentUser = ctx.state.user;
+        const bookingUser = (booking as any).user;
+        if (!currentUser || (bookingUser?.id !== currentUser.id && currentUser.role?.type !== 'admin')) {
+            return ctx.forbidden('You can only pay for your own bookings');
+        }
+
+        // 3. Validate the payment step
+        const paymentSteps = (booking as any).paymentSteps || [];
+        const step = paymentSteps[stepIndex];
+
+        if (!step) {
+            return ctx.badRequest(`Payment step ${stepIndex} not found`);
+        }
+
+        if (step.status === 'paid') {
+            return ctx.badRequest('This payment step is already paid');
+        }
+
+        const offer = booking.offer as any;
+        const tripTitle = offer?.trip?.title || 'Viaggio';
+        const bookingId = (booking as any).id;
+
+        // 4. Create Stripe session
+        try {
+            const sessionOptions: Stripe.Checkout.SessionCreateParams = {
+                payment_method_types: ['card'],
+                line_items: [
+                    {
+                        price_data: {
+                            currency: 'eur',
+                            product_data: {
+                                name: `${step.name} per: ${tripTitle}`,
+                                description: `Prenotazione #${bookingId}`,
+                            },
+                            unit_amount: Math.round(step.amount * 100),
+                        },
+                        quantity: 1,
+                    },
+                ],
+                mode: 'payment',
+                success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/profilo?success=true`,
+                cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/profilo`,
+                metadata: {
+                    booking_id: bookingDocId,
+                    offer_id: offer.documentId,
+                    payment_step_index: String(stepIndex),
+                },
+            };
+
+            // Invoice options if booking was created with invoice request
+            if ((booking as any).requestInvoice) {
+                sessionOptions.tax_id_collection = { enabled: true };
+                sessionOptions.billing_address_collection = 'required';
+                sessionOptions.invoice_creation = { enabled: true };
+                if (bookingUser?.email) {
+                    sessionOptions.customer_email = bookingUser.email;
+                }
+            }
+
+            const session = await stripe.checkout.sessions.create(sessionOptions);
+            console.log(`[PaymentSession] Created Stripe session ${session.id} for step ${stepIndex} of booking ${bookingDocId}`);
+
+            // Save Stripe session ID to the step
+            paymentSteps[stepIndex].stripeSessionId = session.id;
+            await strapi.documents('api::booking.booking').update({
+                documentId: bookingDocId,
+                data: { paymentSteps } as any,
+            });
+
+            return { checkoutUrl: session.url };
+        } catch (error) {
+            console.error('[PaymentSession] Stripe Error:', error);
+            return ctx.internalServerError('Could not create payment session');
         }
     },
 }));

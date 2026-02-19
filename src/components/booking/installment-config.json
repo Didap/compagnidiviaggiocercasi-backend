@@ -1,0 +1,35 @@
+{
+    "collectionName": "components_booking_installment_configs",
+    "info": {
+        "displayName": "InstallmentConfig",
+        "icon": "calendar",
+        "description": "Template for an installment step defined by admin"
+    },
+    "options": {},
+    "attributes": {
+        "name": {
+            "type": "string",
+            "required": true
+        },
+        "percentage": {
+            "type": "decimal",
+            "required": true
+        },
+        "dueDateType": {
+            "type": "enumeration",
+            "enum": [
+                "relative",
+                "precise"
+            ],
+            "default": "relative",
+            "required": true
+        },
+        "relativeMonths": {
+            "type": "integer",
+            "default": 2
+        },
+        "dueDate": {
+            "type": "date"
+        }
+    }
+}

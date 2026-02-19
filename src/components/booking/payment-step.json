@@ -1,0 +1,35 @@
+{
+    "collectionName": "components_booking_payment_steps",
+    "info": {
+        "displayName": "PaymentStep",
+        "icon": "creditCard",
+        "description": "A single payment step (deposit, installment, or balance)"
+    },
+    "options": {},
+    "attributes": {
+        "name": {
+            "type": "string",
+            "required": true
+        },
+        "amount": {
+            "type": "decimal",
+            "required": true
+        },
+        "dueDate": {
+            "type": "date"
+        },
+        "status": {
+            "type": "enumeration",
+            "enum": [
+                "pending",
+                "paid",
+                "overdue"
+            ],
+            "default": "pending",
+            "required": true
+        },
+        "stripeSessionId": {
+            "type": "string"
+        }
+    }
+}

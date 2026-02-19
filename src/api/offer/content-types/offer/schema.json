@@ -51,6 +51,19 @@
       "type": "component",
       "repeatable": true,
       "component": "itinerary.day"
+    },
+    "allowInstallments": {
+      "type": "boolean",
+      "default": false
+    },
+    "installmentsCount": {
+      "type": "integer",
+      "default": 3
+    },
+    "installmentConfigs": {
+      "type": "component",
+      "repeatable": true,
+      "component": "booking.installment-config"
     }
   }
 }

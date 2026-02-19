@@ -67,7 +67,7 @@ export default ({ strapi }: { strapi: any }) => ({
                     // Fetch the booking first.
                     const booking = await strapi.documents('api::booking.booking').findOne({
                         documentId: bookingId,
-                        populate: ['participants'],
+                        populate: ['participants', 'paymentSteps'],
                         status: 'draft'
                     });
 
@@ -75,55 +75,75 @@ export default ({ strapi }: { strapi: any }) => ({
                         console.error(`[Stripe Webhook] Booking ${bookingId} not found.`);
                         return ctx.badRequest('Booking not found');
                     }
-                    console.log(`[Stripe Webhook] Booking Found. Current Status: ${booking.status}`);
+                    console.log(`[Stripe Webhook] Booking Found. Current Status: ${(booking as any).bookingStatus}`);
 
                     const participantsCount = (Array.isArray(booking.participants) && booking.participants.length > 0)
                         ? booking.participants.length
                         : 1;
 
-                    // 3. Check availability
-                    if (occupied + participantsCount > max) {
-                        console.error(`[Stripe Webhook] OVERBOOKING! Offer max ${max}, occupied ${occupied}, requested ${participantsCount}`);
+                    // 3. Mark the payment step as paid
+                    const paymentStepIndex = parseInt(session.metadata?.payment_step_index || '0', 10);
+                    const paymentSteps = (booking as any).paymentSteps || [];
 
-                        // Handle Overbooking
-                        await strapi.documents('api::booking.booking').update({
-                            documentId: bookingId,
-                            status: 'draft',
-                            data: {
-                                status: 'cancelled', // Or a special status like 'refund_pending'
-                                notes: 'System: Cancelled due to overbooking at payment time.'
-                            }
-                        });
-
-                        // TODO: Trigger Refund Logic Here potentially
-                        return ctx.badRequest('Overbooking detected. Booking cancelled.');
+                    if (paymentSteps[paymentStepIndex]) {
+                        paymentSteps[paymentStepIndex].status = 'paid';
+                        paymentSteps[paymentStepIndex].stripeSessionId = session.id;
+                        console.log(`[Stripe Webhook] Marked paymentStep[${paymentStepIndex}] "${paymentSteps[paymentStepIndex].name}" as PAID`);
                     }
 
-                    // 4. Update booking status to Confirmed
-                    console.log(`[Stripe Webhook] Updating Booking ${bookingId} to CONFIRMED...`);
+                    // Check if ALL steps are now paid
+                    const allPaid = paymentSteps.length > 0 && paymentSteps.every((s: any) => s.status === 'paid');
+                    // Check if at least the first step (deposit/first installment) is paid
+                    const firstPaid = paymentSteps.length > 0 && paymentSteps[0]?.status === 'paid';
 
-                    const updatedBooking = await strapi.documents('api::booking.booking').update({
-                        documentId: bookingId as string,
-                        status: 'draft',
-                        data: {
-                            status: 'confirmed',
-                        },
-                    });
+                    console.log(`[Stripe Webhook] All steps paid: ${allPaid}, First step paid: ${firstPaid}`);
 
-                    console.log('[Stripe Webhook] Update Result (Draft):', updatedBooking?.status);
+                    // 4. Check availability (only on first payment / confirmation)
+                    if ((booking as any).bookingStatus !== 'confirmed') {
+                        if (occupied + participantsCount > max) {
+                            console.error(`[Stripe Webhook] OVERBOOKING! Offer max ${max}, occupied ${occupied}, requested ${participantsCount}`);
+                            await strapi.documents('api::booking.booking').update({
+                                documentId: bookingId,
+                                status: 'draft',
+                                data: {
+                                    bookingStatus: 'cancelled',
+                                    notes: 'System: Cancelled due to overbooking at payment time.',
+                                    paymentSteps,
+                                }
+                            });
+                            return ctx.badRequest('Overbooking detected. Booking cancelled.');
+                        }
 
-                    // Explicitly publish the booking to make it final and visible as "Published"
-                    const publishedBooking = await strapi.documents('api::booking.booking').publish({
-                        documentId: bookingId as string,
-                    });
-                    console.log('[Stripe Webhook] Publish Result:', publishedBooking?.status);
+                        // 5. Update booking status to Confirmed + save payment steps
+                        console.log(`[Stripe Webhook] Updating Booking ${bookingId} to CONFIRMED...`);
+                        const updatedBooking = await strapi.documents('api::booking.booking').update({
+                            documentId: bookingId as string,
+                            status: 'draft',
+                            data: {
+                                bookingStatus: 'confirmed',
+                                paymentSteps,
+                            },
+                        });
+                        console.log('[Stripe Webhook] Update Result (Draft):', updatedBooking?.status);
 
-                    // Explicitly publish the booking if your workflow requires it
-                    // awaited strapi.documents('api::booking.booking').publish({ documentId: bookingId });
-
-                    console.log('[Stripe Webhook] Update Result:', updatedBooking?.status);
-
-                    // Recalculation is triggered automatically by afterUpdate lifecycle in src/index.ts
+                        const publishedBooking = await strapi.documents('api::booking.booking').publish({
+                            documentId: bookingId as string,
+                        });
+                        console.log('[Stripe Webhook] Publish Result:', publishedBooking?.status);
+                    } else {
+                        // Booking already confirmed (subsequent installment/balance payment)
+                        console.log(`[Stripe Webhook] Booking already confirmed. Updating payment steps only.`);
+                        await strapi.documents('api::booking.booking').update({
+                            documentId: bookingId as string,
+                            status: 'draft',
+                            data: {
+                                paymentSteps,
+                            },
+                        });
+                        await strapi.documents('api::booking.booking').publish({
+                            documentId: bookingId as string,
+                        });
+                    }
 
                 } catch (error: any) {
                     console.error('[Stripe Webhook] Internal Error:', error);
