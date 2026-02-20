@@ -11,78 +11,8 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
 
 export default factories.createCoreController('api::booking.booking', ({ strapi }) => ({
-    async update(ctx) {
-        const { id } = ctx.params;
-        const { data } = ctx.request.body;
-
-        // 1. Fetch current booking to know previous status and offer
-        const existingBooking = await strapi.documents('api::booking.booking').findOne({
-            documentId: id,
-            populate: ['offer', 'participants'],
-        });
-
-        if (!existingBooking) {
-            return ctx.notFound('Booking not found');
-        }
-
-        const previousStatus = existingBooking.bookingStatus;
-        const newStatus = data.bookingStatus;
-
-        // If status isn't changing, just do default update
-        if (!newStatus || newStatus === previousStatus) {
-            return super.update(ctx);
-        }
-
-        const offer = existingBooking.offer as any;
-        if (!offer) {
-            return ctx.badRequest('Booking has no associated offer');
-        }
-
-        // Calculate participants count
-        const participantsCount = (existingBooking.participants && existingBooking.participants.length > 0)
-            ? existingBooking.participants.length
-            : 1;
-
-        // LOGIC: Handling Seat Counts
-
-        // CASE A: Confirming a booking (pending -> confirmed)
-        if (newStatus === 'confirmed' && previousStatus !== 'confirmed') {
-            // Atomic check (in a perfect world we'd verify this in a transaction)
-            // Re-fetch offer to get latest seat count
-            const freshOffer = await strapi.documents('api::offer.offer').findOne({
-                documentId: offer.documentId,
-            });
-
-            if (freshOffer.occupiedSeats + participantsCount > freshOffer.maxParticipants) {
-                return ctx.badRequest('No seats available for this booking.');
-            }
-
-            // Increment seats
-            await strapi.documents('api::offer.offer').update({
-                documentId: offer.documentId,
-                data: {
-                    occupiedSeats: freshOffer.occupiedSeats + participantsCount,
-                },
-            });
-        }
-
-        // CASE B: Cancelling a confirmed booking (confirmed -> cancelled OR pending)
-        if (previousStatus === 'confirmed' && (newStatus === 'cancelled' || newStatus === 'pending')) {
-            // Decrement seats
-            const freshOffer = await strapi.documents('api::offer.offer').findOne({
-                documentId: offer.documentId,
-            });
-            await strapi.documents('api::offer.offer').update({
-                documentId: offer.documentId,
-                data: {
-                    occupiedSeats: Math.max(0, freshOffer.occupiedSeats - participantsCount),
-                },
-            });
-        }
-
-        // Proceed with standard update
-        return super.update(ctx);
-    },
+    // Seat management is handled by lifecycles.ts (afterUpdate hook)
+    // No custom update override needed
 
     async create(ctx) {
         // 0. Enforce 'pending' status BEFORE validation/creation
@@ -456,5 +386,57 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             console.error('[PaymentSession] Stripe Error:', error);
             return ctx.internalServerError('Could not create payment session');
         }
+    },
+
+    /**
+     * GET /api/bookings/preview-email/:template
+     * Previews the HTML email templates.
+     */
+    async previewEmail(ctx) {
+        const { template } = ctx.params;
+        const emailService = require('../services/email').default;
+
+        const mockData = {
+            userName: 'Alessandro',
+            tripTitle: 'Avventura in Islanda',
+            destination: 'Islanda e Aurore Boreali',
+            startDate: '2026-06-15',
+            endDate: '2026-06-25',
+            participantsCount: 2,
+            totalPrice: 2450,
+            depositPrice: 500,
+            paymentSteps: [
+                { name: 'Acconto', amount: 500, status: 'paid', dueDate: '2026-02-20' },
+                { name: 'Rata 1', amount: 975, status: 'pending', dueDate: '2026-04-15' },
+                { name: 'Rata 2', amount: 975, status: 'pending', dueDate: '2026-05-15' },
+            ],
+        };
+
+        const templates: any = {
+            welcome: () => require('../services/email').default.sendWelcomeEmailHtml(mockData.userName),
+            confirmation: () => require('../services/email').default.sendBookingConfirmedHtml(mockData),
+            receipt: () => require('../services/email').default.sendPaymentReceiptHtml(mockData, 'Rata 1', 975),
+            cancelled: () => require('../services/email').default.sendBookingCancelledHtml(mockData),
+            reminder: () => require('../services/email').default.sendInstallmentReminderHtml(mockData, 'Rata 1', 975, '2026-04-15', false),
+            reminder_urgent: () => require('../services/email').default.sendInstallmentReminderHtml(mockData, 'Rata 1', 975, '2026-04-15', true),
+            trip_30: () => require('../services/email').default.sendTripReminderHtml(mockData, 30),
+            trip_14: () => require('../services/email').default.sendTripReminderHtml(mockData, 14),
+            trip_7: () => require('../services/email').default.sendTripReminderHtml(mockData, 7),
+            trip_1: () => require('../services/email').default.sendTripReminderHtml(mockData, 1),
+        };
+
+        // Note: I need to export the HTML-generating functions in email.ts or adapt here.
+        // Actually, let's adapt email.ts to export the HTML functions or just call them here.
+        // I'll update email.ts to export the HTML generators.
+
+        ctx.type = 'text/html';
+
+        if (templates[template]) {
+            // Wait, email.ts exports sendX functions that send. I need the HTML.
+            // Let's modify email.ts to export the HTML-only versions.
+            return ctx.body = templates[template]();
+        }
+
+        return ctx.notFound('Template not found. Available: ' + Object.keys(templates).join(', '));
     },
 }));

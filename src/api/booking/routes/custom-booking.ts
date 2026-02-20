@@ -13,5 +13,15 @@ export default {
                 middlewares: [],
             },
         },
+        {
+            method: 'GET',
+            path: '/bookings/preview-email/:template',
+            handler: 'booking.previewEmail',
+            config: {
+                auth: false, // Temporarily disable auth for easy previewing
+                policies: [],
+                middlewares: [],
+            },
+        },
     ],
 };

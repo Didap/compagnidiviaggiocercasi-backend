@@ -220,6 +220,25 @@ export default {
       }
     });
 
+    // User Registration Welcome Email
+    strapi.db.lifecycles.subscribe({
+      models: ['plugin::users-permissions.user'],
+
+      async afterCreate(event) {
+        const { result } = event;
+        try {
+          if (result && result.email) {
+            const emailService = require('./api/booking/services/email').default;
+            const userName = result.firstName || result.username || 'Viaggiatore';
+            await emailService.sendWelcomeEmail(strapi, result.email, userName);
+            console.log(`[Auth] Welcome email sent to ${result.email}`);
+          }
+        } catch (err) {
+          console.error('[Auth] Failed to send welcome email:', err);
+        }
+      }
+    });
+
     // Auto-configure permissions
     const configurePermissions = async () => {
       try {

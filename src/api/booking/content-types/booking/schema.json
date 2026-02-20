@@ -65,6 +65,9 @@
             "type": "component",
             "repeatable": true,
             "component": "booking.payment-step"
+        },
+        "operatorCode": {
+            "type": "string"
         }
     }
 }

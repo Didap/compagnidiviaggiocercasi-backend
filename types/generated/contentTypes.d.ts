@@ -459,6 +459,7 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     notes: Schema.Attribute.Text;
     offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'>;
+    operatorCode: Schema.Attribute.String;
     participants: Schema.Attribute.Component<'booking.traveler', true>;
     paymentOption: Schema.Attribute.Enumeration<
       ['full', 'deposit', 'installments']

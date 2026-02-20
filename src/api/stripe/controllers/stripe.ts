@@ -1,5 +1,6 @@
 
 import Stripe from 'stripe';
+import emailService from '../../booking/services/email';
 
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
@@ -67,7 +68,7 @@ export default ({ strapi }: { strapi: any }) => ({
                     // Fetch the booking first.
                     const booking = await strapi.documents('api::booking.booking').findOne({
                         documentId: bookingId,
-                        populate: ['participants', 'paymentSteps'],
+                        populate: ['participants', 'paymentSteps', 'user', 'offer', 'offer.trip'],
                         status: 'draft'
                     });
 
@@ -89,6 +90,32 @@ export default ({ strapi }: { strapi: any }) => ({
                         paymentSteps[paymentStepIndex].status = 'paid';
                         paymentSteps[paymentStepIndex].stripeSessionId = session.id;
                         console.log(`[Stripe Webhook] Marked paymentStep[${paymentStepIndex}] "${paymentSteps[paymentStepIndex].name}" as PAID`);
+
+                        // Send payment receipt email
+                        const bookingUser = (booking as any).user;
+                        if (bookingUser?.email) {
+                            const bookingOffer = (booking as any).offer;
+                            const emailData = {
+                                userName: bookingUser.firstName || bookingUser.username || 'Viaggiatore',
+                                tripTitle: bookingOffer?.trip?.title || 'Viaggio',
+                                destination: bookingOffer?.trip?.destination || '',
+                                startDate: bookingOffer?.startDate,
+                                endDate: bookingOffer?.endDate,
+                                participantsCount,
+                                totalPrice: Number((booking as any).totalPrice || 0),
+                                depositPrice: Number((booking as any).depositPrice || 0),
+                                paymentSteps,
+                            };
+                            const paidStep = paymentSteps[paymentStepIndex];
+                            try {
+                                await emailService.sendPaymentReceipt(
+                                    strapi, bookingUser.email, emailData,
+                                    paidStep.name, Number(paidStep.amount)
+                                );
+                            } catch (emailErr: any) {
+                                console.error('[Stripe Webhook] Payment receipt email failed:', emailErr.message);
+                            }
+                        }
                     }
 
                     // Check if ALL steps are now paid
