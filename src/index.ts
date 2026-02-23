@@ -285,7 +285,7 @@ export default {
 
         const authenticatedPermissions = [
           ...publicPermissions,
-          'api::booking.booking.create', 'api::booking.booking.find', 'api::booking.booking.findOne', 'api::booking.booking.update',
+          'api::booking.booking.create', 'api::booking.booking.find', 'api::booking.booking.findOne', 'api::booking.booking.update', 'api::booking.booking.createPaymentSession',
           'api::trip-proposal.trip-proposal.create', 'api::trip-proposal.trip-proposal.find', 'api::trip-proposal.trip-proposal.findOne',
           'api::review.review.create',
           'plugin::users-permissions.user.findOne', 'plugin::users-permissions.user.update'

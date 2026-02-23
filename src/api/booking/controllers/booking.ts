@@ -37,6 +37,52 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             ? participantsPayload.length
             : 1;
 
+        // PRE-VALIDATION to prevent occupying seats and leaking DB rows
+        const offerId = ctx.request.body.data.offer;
+        if (offerId) {
+            const offerCheck = await strapi.documents('api::offer.offer').findOne({
+                documentId: typeof offerId === 'object' ? offerId.documentId || offerId.id || offerId : offerId,
+                populate: ['installmentConfigs'],
+            });
+
+            if (offerCheck) {
+                if (offerCheck.startDate) {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const start = new Date(offerCheck.startDate);
+                    start.setHours(0, 0, 0, 0);
+                    const diffDays = Math.ceil((start.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                    if (diffDays < 30) {
+                        return ctx.badRequest('Le prenotazioni per questo viaggio sono chiuse (meno di 30 giorni alla partenza).');
+                    }
+                }
+
+                if (paymentOption === 'installments' && offerCheck.allowInstallments && offerCheck.installmentConfigs?.length > 0) {
+                    const configs = offerCheck.installmentConfigs;
+                    const startDate = offerCheck.startDate ? new Date(offerCheck.startDate) : null;
+                    let firstDueDate: Date | null = null;
+                    if (configs[0].dueDateType === 'relative' && startDate && configs[0].relativeMonths) {
+                        firstDueDate = new Date(startDate);
+                        firstDueDate.setMonth(firstDueDate.getMonth() - configs[0].relativeMonths);
+                    } else if (configs[0].dueDate) {
+                        firstDueDate = new Date(configs[0].dueDate);
+                    }
+                    if (firstDueDate) {
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        firstDueDate.setHours(0, 0, 0, 0);
+                        if (firstDueDate.getTime() < today.getTime()) {
+                            return ctx.badRequest('Il pagamento a rate non è più disponibile per questa offerta.');
+                        }
+                    }
+                }
+            } else {
+                return ctx.badRequest('Offer not found.');
+            }
+        } else {
+            return ctx.badRequest('Offer is required.');
+        }
+
         // 1. Create the booking (status = 'pending')
         const response = await super.create(ctx);
 
@@ -61,22 +107,7 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
         const totalPrice = (totalPricePerPerson + depositPerPerson) * participantsCount;
         const totalDeposit = depositPerPerson * participantsCount;
 
-        // 3a. Check Booking Deadline (30 days)
-        if (offer.startDate) {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const start = new Date(offer.startDate);
-            start.setHours(0, 0, 0, 0);
-            const diffTime = start.getTime() - today.getTime();
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-            if (diffDays < 30) {
-                // Determine if we should delete the pending booking since it's invalid
-                // Ideally, yes, to keep DB clean.
-                await strapi.documents('api::booking.booking').delete({ documentId: bookingDocId });
-                return ctx.badRequest('Le prenotazioni per questo viaggio sono chiuse (meno di 30 giorni alla partenza).');
-            }
-        }
+        // (Booking deadline validated prior to creation)
 
         // 3. Generate payment steps based on paymentOption
         let paymentSteps: any[] = [];
@@ -118,17 +149,7 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                     return { ...cfg, resolvedDueDate };
                 });
 
-                // Validate: first due date must not be in the past
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const firstResolved = resolvedConfigs[0]?.resolvedDueDate;
-                if (firstResolved) {
-                    firstResolved.setHours(0, 0, 0, 0);
-                    if (firstResolved.getTime() < today.getTime()) {
-                        await strapi.documents('api::booking.booking').delete({ documentId: bookingDocId });
-                        return ctx.badRequest('Il pagamento a rate non è più disponibile per questa offerta (scadenza prima rata superata).');
-                    }
-                }
+                // (First due date validated prior to creation)
 
                 // Map configs to installment steps using percentage on PRICE ONLY
                 // If evenly divisible, use clean division; otherwise percentage-based
@@ -314,7 +335,20 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
         // 2. Verify ownership
         const currentUser = ctx.state.user;
         const bookingUser = (booking as any).user;
-        if (!currentUser || (bookingUser?.id !== currentUser.id && currentUser.role?.type !== 'admin')) {
+
+        console.log(`[PaymentSession] Ownership try: Request from user ${currentUser?.id || currentUser?.documentId}, Booking belongs to ${bookingUser?.id || bookingUser?.documentId}`);
+
+        if (!currentUser) {
+            return ctx.forbidden('You must be logged in to pay for a booking.');
+        }
+
+        const isOwner = bookingUser && (
+            bookingUser.id === currentUser.id ||
+            bookingUser.documentId === currentUser.documentId
+        );
+        const isAdmin = currentUser.role?.type === 'admin'; // If roles are populated on state.user
+
+        if (!isOwner && !isAdmin) {
             return ctx.forbidden('You can only pay for your own bookings');
         }
 
