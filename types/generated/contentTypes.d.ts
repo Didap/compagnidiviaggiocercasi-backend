@@ -549,6 +549,7 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
     price: Schema.Attribute.Decimal & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     startDate: Schema.Attribute.Date & Schema.Attribute.Required;
+    supplement: Schema.Attribute.JSON & Schema.Attribute.DefaultTo<{}>;
     trip: Schema.Attribute.Relation<'manyToOne', 'api::trip.trip'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -662,11 +663,11 @@ export interface ApiTripProposalTripProposal
     > &
       Schema.Attribute.Private;
     preferredPeriod: Schema.Attribute.String;
-    publishedAt: Schema.Attribute.DateTime;
-    status: Schema.Attribute.Enumeration<
+    proposalStatus: Schema.Attribute.Enumeration<
       ['pending', 'reviewed', 'accepted', 'rejected']
     > &
       Schema.Attribute.DefaultTo<'pending'>;
+    publishedAt: Schema.Attribute.DateTime;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
