@@ -68,6 +68,10 @@
     "supplement": {
       "type": "json",
       "default": {}
+    },
+    "daysBeforeClose": {
+      "type": "integer",
+      "default": 0
     }
   }
 }
