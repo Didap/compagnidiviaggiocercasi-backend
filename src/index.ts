@@ -310,6 +310,23 @@ export default {
       }
     };
 
-    configurePermissions();
+    // Run seed only once (first deploy), after 10s delay
+    setTimeout(async () => {
+      try {
+        const store = strapi.store({ type: 'core', name: 'seed' });
+        const alreadySeeded = await store.get({ key: 'permissionsSeeded' });
+
+        if (!alreadySeeded) {
+          console.log('[Seed] First deploy detected. Seeding permissions...');
+          await configurePermissions();
+          await store.set({ key: 'permissionsSeeded', value: true });
+          console.log('[Seed] Permissions seeded and flag saved.');
+        } else {
+          console.log('[Seed] Permissions already seeded. Skipping.');
+        }
+      } catch (err: any) {
+        console.error('[Seed] Error during permission seeding:', err.message);
+      }
+    }, 10000);
   },
 };
