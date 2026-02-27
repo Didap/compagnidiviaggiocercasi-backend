@@ -2,22 +2,22 @@ import { factories } from '@strapi/strapi';
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:1337';
 const BRAND = 'Compagni di Viaggio Cercasi';
-const LOGO_URL = `${BACKEND_URL}/logo.png`;
+const LOGO_URL = 'https://res.cloudinary.com/daz1m90yx/image/upload/v1772196404/brand/email/logo.png';
 
 const C = {
-    orange: '#cf5827',
-    teal: '#45828a',
-    bg: '#f9fafb',
-    card: '#ffffff',
-    border: '#f0f0f0',
-    textPrimary: '#111827',
-    textSecondary: '#6b7280',
-    textMuted: '#9ca3af',
-    divider: '#e5e7eb',
+  orange: '#cf5827',
+  teal: '#45828a',
+  bg: '#f9fafb',
+  card: '#ffffff',
+  border: '#f0f0f0',
+  textPrimary: '#111827',
+  textSecondary: '#6b7280',
+  textMuted: '#9ca3af',
+  divider: '#e5e7eb',
 };
 
 function buildContactEmailHtml(name: string, email: string, subject: string, message: string): string {
-    return `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="it">
 <head>
 <meta charset="UTF-8">
@@ -114,27 +114,27 @@ function buildContactEmailHtml(name: string, email: string, subject: string, mes
 }
 
 export default factories.createCoreController('api::contact-message.contact-message' as any, ({ strapi }) => ({
-    async create(ctx) {
-        // 1. Save the message using the core controller behavior
-        const response = await super.create(ctx);
+  async create(ctx) {
+    // 1. Save the message using the core controller behavior
+    const response = await super.create(ctx);
 
-        // 2. Extract the data submitted
-        const { name, email, subject, message } = response.data;
+    // 2. Extract the data submitted
+    const { name, email, subject, message } = response.data;
 
-        // 3. Send styled email to the admin
-        try {
-            await strapi.plugin('email').service('email').send({
-                to: process.env.RESEND_FROM_EMAIL || 'info@compagnidiviaggiocercasi.it',
-                from: process.env.RESEND_FROM_EMAIL || 'info@compagnidiviaggiocercasi.it',
-                replyTo: email,
-                subject: `Nuovo messaggio dal sito: ${subject || 'Contatto'}`,
-                html: buildContactEmailHtml(name, email, subject, message),
-            });
-            console.log('Contact email sent successfully via Resend');
-        } catch (err) {
-            console.error('Failed to send contact notification email:', err);
-        }
-
-        return response;
+    // 3. Send styled email to the admin
+    try {
+      await strapi.plugin('email').service('email').send({
+        to: process.env.RESEND_FROM_EMAIL || 'info@compagnidiviaggiocercasi.it',
+        from: process.env.RESEND_FROM_EMAIL || 'info@compagnidiviaggiocercasi.it',
+        replyTo: email,
+        subject: `Nuovo messaggio dal sito: ${subject || 'Contatto'}`,
+        html: buildContactEmailHtml(name, email, subject, message),
+      });
+      console.log('Contact email sent successfully via Resend');
+    } catch (err) {
+      console.error('Failed to send contact notification email:', err);
     }
+
+    return response;
+  }
 }));

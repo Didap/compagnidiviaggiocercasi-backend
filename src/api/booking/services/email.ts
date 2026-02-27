@@ -9,7 +9,7 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:1337';
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'info@compagnidiviaggiocercasi.it';
 const BRAND = 'Compagni di Viaggio Cercasi';
-const LOGO_URL = `${BACKEND_URL}/logo.png`;
+const LOGO_URL = 'https://res.cloudinary.com/daz1m90yx/image/upload/v1772196404/brand/email/logo.png';
 
 const C = {
   orange: '#cf5827',

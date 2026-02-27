@@ -15,6 +15,9 @@
             "type": "decimal",
             "required": true
         },
+        "amount": {
+            "type": "decimal"
+        },
         "dueDateType": {
             "type": "enumeration",
             "enum": [

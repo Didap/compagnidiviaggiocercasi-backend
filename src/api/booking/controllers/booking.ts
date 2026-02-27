@@ -88,10 +88,10 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
 
         if (!currentUser) {
             // Guest checkout: user is not logged in
-            const { email, firstName, lastName, codiceFiscale, address, city, zip, province } = ctx.request.body.data;
+            const { email, firstName, lastName, password, phone, codiceFiscale, address, city, zip, province } = ctx.request.body.data;
 
-            if (!email || !firstName || !lastName) {
-                return ctx.badRequest('Email, nome e cognome sono obbligatori per prenotare.');
+            if (!email || !firstName || !lastName || !password) {
+                return ctx.badRequest('Email, nome, cognome e password sono obbligatori per prenotare.');
             }
 
             // Check if user already exists
@@ -123,9 +123,7 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                     console.log(`[Guest Checkout] Updated profile fields for existing user ${userId}`);
                 }
             } else {
-                // Create new user
-                const crypto = require('crypto');
-                const randomPassword = crypto.randomBytes(16).toString('hex');
+                // Create new user with user-provided password
 
                 // Find the authenticated role
                 const authenticatedRole = await strapi.db.query('plugin::users-permissions.role').findOne({
@@ -136,13 +134,14 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                     data: {
                         username: email.toLowerCase().trim(),
                         email: email.toLowerCase().trim(),
-                        password: randomPassword,
+                        password: password,
                         provider: 'local',
                         confirmed: true,
                         blocked: false,
                         role: authenticatedRole?.documentId || authenticatedRole?.id,
                         firstName: firstName,
                         lastName: lastName,
+                        phone: phone || null,
                         codiceFiscale: codiceFiscale || null,
                         address: address || null,
                         city: city || null,
@@ -158,14 +157,7 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                 const jwtService = strapi.plugin('users-permissions').service('jwt');
                 guestJwt = jwtService.issue({ id: newUser.id });
 
-                // Send welcome email to the new user
-                try {
-                    const emailService = require('../services/email').default;
-                    await emailService.sendWelcomeEmail(strapi, email, firstName);
-                    console.log(`[Guest Checkout] Welcome email sent to ${email}`);
-                } catch (emailErr) {
-                    console.error('[Guest Checkout] Failed to send welcome email:', emailErr);
-                }
+                // Note: Welcome email is sent automatically by the global user afterCreate lifecycle in index.ts
             }
 
             // Assign user to the booking payload
@@ -204,12 +196,43 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
         ctx.request.body.data.zip = ctx.request.body.data.zip || null;
         ctx.request.body.data.province = ctx.request.body.data.province || null;
 
-        // 1. Create the booking (status = 'pending')
-        const response = await super.create(ctx);
+        // Clean up non-schema keys before Strapi validation
+        // These were used above for guest checkout logic but are not part of the booking schema
+        delete ctx.request.body.data.selectedSupplements;
+        delete ctx.request.body.data.email;
+        delete ctx.request.body.data.firstName;
+        delete ctx.request.body.data.lastName;
+        delete ctx.request.body.data.password;
+        delete ctx.request.body.data.phone;
 
-        const bookingDocId = response.data.documentId || response.data.id;
-        const bookingId = response.data.id;
+        // Save the offer documentId, then remove it from payload to avoid relation validation
+        const offerDocumentId = ctx.request.body.data.offer;
+        delete ctx.request.body.data.offer;
+        // Also remove user (we'll link via query engine)
+        delete ctx.request.body.data.user;
+
+        // 1. Create the booking via Document Service WITHOUT the offer relation (no relation = no validation)
+        const createdBooking = await strapi.documents('api::booking.booking').create({
+            data: {
+                ...ctx.request.body.data,
+            },
+            status: 'published',
+        });
+
+        const bookingDocId = createdBooking.documentId;
+        const bookingId = createdBooking.id;
         console.log(`[Create Booking] Created Booking ID: ${bookingId}, DocID: ${bookingDocId}`);
+
+        // 2. Link the offer and user via Document Service update (update does NOT validate relations like create does)
+        const userDocId = ctx.state.user?.documentId || ctx.state.user?.id || null;
+        await strapi.documents('api::booking.booking').update({
+            documentId: bookingDocId,
+            data: {
+                offer: offerDocumentId,
+                ...(userDocId ? { user: userDocId } : {}),
+            } as any,
+        });
+        console.log(`[Create Booking] Linked offer ${offerDocumentId} and user ${userDocId || 'none'} to booking ${bookingDocId}`);
 
         // 2. Fetch booking with relations (include installmentConfigs)
         const booking = await strapi.documents('api::booking.booking').findOne({
@@ -363,6 +386,11 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             } as any,
         });
 
+        // Publish the booking so it's not stuck in draft/modified
+        await strapi.documents('api::booking.booking').publish({
+            documentId: bookingDocId,
+        });
+
         // 5. Create Stripe Checkout Session for the FIRST step only
         try {
             const hasRequestedInvoice = requestInvoice;
@@ -421,9 +449,8 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             });
 
             return {
-                ...response,
+                data: createdBooking,
                 meta: {
-                    ...response.meta,
                     checkoutUrl: session.url,
                     ...(guestJwt ? { guestJwt } : {}),
                 },

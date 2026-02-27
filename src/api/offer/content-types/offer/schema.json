@@ -12,6 +12,11 @@
   },
   "pluginOptions": {},
   "attributes": {
+    "attivo": {
+      "type": "boolean",
+      "default": true,
+      "required": true
+    },
     "trip": {
       "type": "relation",
       "relation": "manyToOne",

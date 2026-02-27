@@ -8,6 +8,7 @@ export interface BookingInstallmentConfig extends Struct.ComponentSchema {
     icon: 'calendar';
   };
   attributes: {
+    amount: Schema.Attribute.Decimal;
     dueDate: Schema.Attribute.Date;
     dueDateType: Schema.Attribute.Enumeration<['relative', 'precise']> &
       Schema.Attribute.Required &

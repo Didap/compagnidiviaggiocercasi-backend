@@ -565,6 +565,9 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
   attributes: {
     allowInstallments: Schema.Attribute.Boolean &
       Schema.Attribute.DefaultTo<false>;
+    attivo: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
