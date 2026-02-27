@@ -278,6 +278,8 @@ export default {
           'api::post.post.find', 'api::post.post.findOne',
           'api::review.review.find', 'api::review.review.findOne',
           'api::newsletter-registration.newsletter-registration.create', // Public newsletter
+          'api::contact-message.contact-message.create', // Public contact form
+          'api::booking.booking.create', // Public guest checkout
           'plugin::upload.content-api.find', // Images
           // 'plugin::users-permissions.auth.callback', // Login (handled by plugin default)
           // 'plugin::users-permissions.auth.register' // Register

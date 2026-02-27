@@ -92,6 +92,21 @@
       "relation": "oneToMany",
       "target": "api::trip-proposal.trip-proposal",
       "mappedBy": "user"
+    },
+    "codiceFiscale": {
+      "type": "string"
+    },
+    "address": {
+      "type": "string"
+    },
+    "city": {
+      "type": "string"
+    },
+    "zip": {
+      "type": "string"
+    },
+    "province": {
+      "type": "string"
     }
   }
 }

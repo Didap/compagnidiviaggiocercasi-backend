@@ -68,6 +68,24 @@
         },
         "operatorCode": {
             "type": "string"
+        },
+        "guestEmail": {
+            "type": "email"
+        },
+        "codiceFiscale": {
+            "type": "string"
+        },
+        "address": {
+            "type": "string"
+        },
+        "city": {
+            "type": "string"
+        },
+        "zip": {
+            "type": "string"
+        },
+        "province": {
+            "type": "string"
         }
     }
 }

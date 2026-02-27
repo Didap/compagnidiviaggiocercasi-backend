@@ -82,6 +82,127 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
         } else {
             return ctx.badRequest('Offer is required.');
         }
+        // === GUEST CHECKOUT: Auto-create or find user ===
+        let guestJwt: string | null = null;
+        const currentUser = ctx.state?.user;
+
+        if (!currentUser) {
+            // Guest checkout: user is not logged in
+            const { email, firstName, lastName, codiceFiscale, address, city, zip, province } = ctx.request.body.data;
+
+            if (!email || !firstName || !lastName) {
+                return ctx.badRequest('Email, nome e cognome sono obbligatori per prenotare.');
+            }
+
+            // Check if user already exists
+            const existingUsers = await strapi.db.query('plugin::users-permissions.user').findMany({
+                where: { email: email.toLowerCase().trim() },
+            });
+
+            let userId: any;
+
+            if (existingUsers.length > 0) {
+                // User exists: link booking to existing user
+                userId = existingUsers[0].documentId || existingUsers[0].id;
+                console.log(`[Guest Checkout] Found existing user ${userId} for email ${email}`);
+
+                // Update user's profile fields if they were empty
+                const existingUser = existingUsers[0];
+                const updateData: any = {};
+                if (!existingUser.codiceFiscale && codiceFiscale) updateData.codiceFiscale = codiceFiscale;
+                if (!existingUser.address && address) updateData.address = address;
+                if (!existingUser.city && city) updateData.city = city;
+                if (!existingUser.zip && zip) updateData.zip = zip;
+                if (!existingUser.province && province) updateData.province = province;
+
+                if (Object.keys(updateData).length > 0) {
+                    await strapi.documents('plugin::users-permissions.user').update({
+                        documentId: userId,
+                        data: updateData,
+                    });
+                    console.log(`[Guest Checkout] Updated profile fields for existing user ${userId}`);
+                }
+            } else {
+                // Create new user
+                const crypto = require('crypto');
+                const randomPassword = crypto.randomBytes(16).toString('hex');
+
+                // Find the authenticated role
+                const authenticatedRole = await strapi.db.query('plugin::users-permissions.role').findOne({
+                    where: { type: 'authenticated' },
+                });
+
+                const newUser = await strapi.documents('plugin::users-permissions.user').create({
+                    data: {
+                        username: email.toLowerCase().trim(),
+                        email: email.toLowerCase().trim(),
+                        password: randomPassword,
+                        provider: 'local',
+                        confirmed: true,
+                        blocked: false,
+                        role: authenticatedRole?.documentId || authenticatedRole?.id,
+                        firstName: firstName,
+                        lastName: lastName,
+                        codiceFiscale: codiceFiscale || null,
+                        address: address || null,
+                        city: city || null,
+                        zip: zip || null,
+                        province: province || null,
+                    } as any,
+                });
+
+                userId = newUser.documentId || newUser.id;
+                console.log(`[Guest Checkout] Created new user ${userId} for email ${email}`);
+
+                // Generate JWT for redirect after Stripe payment
+                const jwtService = strapi.plugin('users-permissions').service('jwt');
+                guestJwt = jwtService.issue({ id: newUser.id });
+
+                // Send welcome email to the new user
+                try {
+                    const emailService = require('../services/email').default;
+                    await emailService.sendWelcomeEmail(strapi, email, firstName);
+                    console.log(`[Guest Checkout] Welcome email sent to ${email}`);
+                } catch (emailErr) {
+                    console.error('[Guest Checkout] Failed to send welcome email:', emailErr);
+                }
+            }
+
+            // Assign user to the booking payload
+            ctx.request.body.data.user = userId;
+            ctx.request.body.data.guestEmail = email.toLowerCase().trim();
+
+            // Fake the auth context so Strapi's core controller doesn't reject
+            ctx.state.user = existingUsers?.length > 0
+                ? existingUsers[0]
+                : await strapi.db.query('plugin::users-permissions.user').findOne({ where: { email: email.toLowerCase().trim() } });
+        } else {
+            // Logged-in user: update their profile fields if provided
+            const { codiceFiscale, address, city, zip, province } = ctx.request.body.data;
+            const updateData: any = {};
+            if (codiceFiscale) updateData.codiceFiscale = codiceFiscale;
+            if (address) updateData.address = address;
+            if (city) updateData.city = city;
+            if (zip) updateData.zip = zip;
+            if (province) updateData.province = province;
+
+            if (Object.keys(updateData).length > 0) {
+                const userDocId = currentUser.documentId || currentUser.id;
+                await strapi.documents('plugin::users-permissions.user').update({
+                    documentId: userDocId,
+                    data: updateData,
+                });
+                console.log(`[Create Booking] Updated profile fields for user ${userDocId}`);
+            }
+        }
+
+        // Persist address/tax fields on the booking itself
+        // (so the booking record has a snapshot of the data at booking time)
+        ctx.request.body.data.codiceFiscale = ctx.request.body.data.codiceFiscale || null;
+        ctx.request.body.data.address = ctx.request.body.data.address || null;
+        ctx.request.body.data.city = ctx.request.body.data.city || null;
+        ctx.request.body.data.zip = ctx.request.body.data.zip || null;
+        ctx.request.body.data.province = ctx.request.body.data.province || null;
 
         // 1. Create the booking (status = 'pending')
         const response = await super.create(ctx);
@@ -263,7 +384,9 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                     },
                 ],
                 mode: 'payment',
-                success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/prenotazione/successo?session_id={CHECKOUT_SESSION_ID}`,
+                success_url: guestJwt
+                    ? `${process.env.FRONTEND_URL || 'http://localhost:5173'}/prenotazione/successo?session_id={CHECKOUT_SESSION_ID}&guest_jwt=${guestJwt}`
+                    : `${process.env.FRONTEND_URL || 'http://localhost:5173'}/prenotazione/successo?session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/prenotazione/annullato?offer_id=${offer.documentId}`,
                 metadata: {
                     booking_id: bookingDocId,
@@ -302,6 +425,7 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                 meta: {
                     ...response.meta,
                     checkoutUrl: session.url,
+                    ...(guestJwt ? { guestJwt } : {}),
                 },
             };
         } catch (error) {

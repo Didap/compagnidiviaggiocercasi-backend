@@ -442,15 +442,19 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    address: Schema.Attribute.String;
     bookingStatus: Schema.Attribute.Enumeration<
       ['pending', 'confirmed', 'cancelled']
     > &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'pending'>;
+    city: Schema.Attribute.String;
+    codiceFiscale: Schema.Attribute.String;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     depositPrice: Schema.Attribute.Decimal & Schema.Attribute.Required;
+    guestEmail: Schema.Attribute.Email;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -466,6 +470,7 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.DefaultTo<'deposit'>;
     paymentSteps: Schema.Attribute.Component<'booking.payment-step', true>;
+    province: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     requestInvoice: Schema.Attribute.Boolean &
       Schema.Attribute.DefaultTo<false>;
@@ -477,6 +482,40 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
       'manyToOne',
       'plugin::users-permissions.user'
     >;
+    zip: Schema.Attribute.String;
+  };
+}
+
+export interface ApiContactMessageContactMessage
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'contact_messages';
+  info: {
+    description: 'Messages sent from contact forms';
+    displayName: 'Contact Message';
+    pluralName: 'contact-messages';
+    singularName: 'contact-message';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    email: Schema.Attribute.Email & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::contact-message.contact-message'
+    > &
+      Schema.Attribute.Private;
+    message: Schema.Attribute.Text & Schema.Attribute.Required;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    subject: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
   };
 }
 
@@ -529,6 +568,7 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    daysBeforeClose: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
     depositPrice: Schema.Attribute.Decimal & Schema.Attribute.Required;
     endDate: Schema.Attribute.Date & Schema.Attribute.Required;
     installmentConfigs: Schema.Attribute.Component<
@@ -1176,9 +1216,12 @@ export interface PluginUsersPermissionsUser
     draftAndPublish: false;
   };
   attributes: {
+    address: Schema.Attribute.String;
     avatar: Schema.Attribute.Media<'images'>;
     birthday: Schema.Attribute.Date;
     blocked: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    city: Schema.Attribute.String;
+    codiceFiscale: Schema.Attribute.String;
     confirmationToken: Schema.Attribute.String & Schema.Attribute.Private;
     confirmed: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     createdAt: Schema.Attribute.DateTime;
@@ -1204,6 +1247,7 @@ export interface PluginUsersPermissionsUser
       }>;
     phone: Schema.Attribute.String;
     provider: Schema.Attribute.String;
+    province: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     resetPasswordToken: Schema.Attribute.String & Schema.Attribute.Private;
     role: Schema.Attribute.Relation<
@@ -1223,6 +1267,7 @@ export interface PluginUsersPermissionsUser
       Schema.Attribute.SetMinMaxLength<{
         minLength: 3;
       }>;
+    zip: Schema.Attribute.String;
   };
 }
 
@@ -1238,6 +1283,7 @@ declare module '@strapi/strapi' {
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
       'api::booking.booking': ApiBookingBooking;
+      'api::contact-message.contact-message': ApiContactMessageContactMessage;
       'api::newsletter-registration.newsletter-registration': ApiNewsletterRegistrationNewsletterRegistration;
       'api::offer.offer': ApiOfferOffer;
       'api::post.post': ApiPostPost;
