@@ -113,6 +113,85 @@ function buildContactEmailHtml(name: string, email: string, subject: string, mes
 </html>`;
 }
 
+function buildConfirmationEmailHtml(name: string, subject: string, message: string): string {
+  return `<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Messaggio ricevuto — ${BRAND}</title>
+</head>
+<body style="margin:0;padding:0;background:${C.bg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased;">
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.bg};">
+<tr><td align="center" style="padding:40px 16px;">
+
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+
+  <!-- Logo -->
+  <tr><td align="center" style="padding:0 0 32px;">
+    <img src="${LOGO_URL}" alt="${BRAND}" width="160" style="display:block;max-width:160px;height:auto;border:0;" />
+  </td></tr>
+
+  <!-- Card -->
+  <tr><td style="background:${C.card};border-radius:12px;border:1px solid ${C.border};">
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <!-- Header -->
+      <tr><td style="padding:40px 40px 24px;text-align:center;">
+        <div style="font-size:40px;margin-bottom:12px;">✅</div>
+        <h1 style="margin:0 0 6px;font-size:22px;font-weight:700;color:${C.textPrimary};line-height:1.3;">Messaggio ricevuto!</h1>
+        <p style="margin:0;font-size:14px;color:${C.textSecondary};line-height:1.5;">Ciao ${name}, abbiamo ricevuto il tuo messaggio e ti risponderemo il prima possibile.</p>
+      </td></tr>
+
+      <!-- Body -->
+      <tr><td style="padding:0 40px 32px;">
+
+        <!-- Riepilogo -->
+        <p style="margin:16px 0 8px;font-size:11px;font-weight:700;color:${C.textMuted};text-transform:uppercase;letter-spacing:1px;">Il tuo messaggio</p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${C.divider};border-radius:8px;margin:8px 0;">
+          <tr><td style="padding:16px 20px;">
+            <p style="margin:0 0 8px;font-size:13px;color:${C.textSecondary};">Oggetto: <strong style="color:${C.textPrimary};">${subject || '—'}</strong></p>
+            <p style="margin:0;font-size:14px;color:${C.textPrimary};line-height:1.7;white-space:pre-wrap;">${message}</p>
+          </td></tr>
+        </table>
+
+        <!-- Info risposta -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.bg};border-radius:8px;margin:24px 0 0;padding:16px 20px;">
+          <tr><td style="padding:16px 20px;">
+            <p style="margin:0;font-size:13px;color:${C.textSecondary};line-height:1.6;">
+              Di solito rispondiamo entro <strong style="color:${C.textPrimary};">24-48 ore</strong>. Se hai bisogno di assistenza urgente, puoi scriverci direttamente a
+              <a href="mailto:info@compagnidiviaggiocercasi.it" style="color:${C.orange};text-decoration:none;">info@compagnidiviaggiocercasi.it</a>.
+            </p>
+          </td></tr>
+        </table>
+
+      </td></tr>
+    </table>
+
+  </td></tr>
+
+  <!-- Footer -->
+  <tr><td style="padding:32px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr><td align="center">
+        <p style="margin:0 0 12px;font-size:12px;color:${C.textMuted};line-height:1.6;">
+          Questa è una conferma automatica. Non rispondere a questa email.
+        </p>
+        <p style="margin:0;font-size:11px;color:${C.textMuted};">
+          © ${new Date().getFullYear()} ${BRAND}
+        </p>
+      </td></tr>
+    </table>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
 export default factories.createCoreController('api::contact-message.contact-message' as any, ({ strapi }) => ({
   async create(ctx) {
     // 1. Save the message using the core controller behavior
@@ -133,6 +212,19 @@ export default factories.createCoreController('api::contact-message.contact-mess
       console.log('Contact email sent successfully via Resend');
     } catch (err) {
       console.error('Failed to send contact notification email:', err);
+    }
+
+    // 4. Send confirmation email to the user
+    try {
+      await strapi.plugin('email').service('email').send({
+        to: email,
+        from: process.env.RESEND_FROM_EMAIL || 'info@compagnidiviaggiocercasi.it',
+        subject: `Abbiamo ricevuto il tuo messaggio — ${BRAND}`,
+        html: buildConfirmationEmailHtml(name, subject, message),
+      });
+      console.log(`Confirmation email sent to ${email}`);
+    } catch (err) {
+      console.error('Failed to send confirmation email to user:', err);
     }
 
     return response;
