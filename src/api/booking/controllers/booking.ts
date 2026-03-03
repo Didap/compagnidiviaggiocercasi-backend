@@ -248,7 +248,8 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
         const totalPricePerPerson = Number(offer.price);
         const depositPerPerson = Number(offer.depositPrice);
         const tripTitle = offer.trip?.title || 'Viaggio';
-        const totalPrice = (totalPricePerPerson + depositPerPerson) * participantsCount;
+        // price is now the TOTAL price; depositPrice is included in it
+        const totalPrice = totalPricePerPerson * participantsCount;
         const totalDeposit = depositPerPerson * participantsCount;
 
         // (Booking deadline validated prior to creation)
@@ -267,8 +268,8 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             ];
         } else if (paymentOption === 'installments' && offer.allowInstallments) {
             const configs = offer.installmentConfigs;
-            // Installments apply only to the price (excluding deposit)
-            const totalPriceOnly = totalPricePerPerson * participantsCount;
+            // Installments apply to the balance (total price minus deposit)
+            const totalPriceOnly = (totalPricePerPerson - depositPerPerson) * participantsCount;
 
             // Step 0: Acconto (deposit) — always paid immediately
             paymentSteps.push({

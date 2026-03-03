@@ -12,6 +12,11 @@
   },
   "pluginOptions": {},
   "attributes": {
+    "attivo": {
+      "type": "boolean",
+      "default": true,
+      "required": true
+    },
     "title": {
       "type": "string",
       "required": true

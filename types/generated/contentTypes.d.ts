@@ -735,6 +735,9 @@ export interface ApiTripTrip extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    attivo: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
