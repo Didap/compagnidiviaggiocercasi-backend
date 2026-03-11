@@ -290,7 +290,8 @@ export default {
           'api::booking.booking.create', 'api::booking.booking.find', 'api::booking.booking.findOne', 'api::booking.booking.update', 'api::booking.booking.createPaymentSession',
           'api::trip-proposal.trip-proposal.create', 'api::trip-proposal.trip-proposal.find', 'api::trip-proposal.trip-proposal.findOne',
           'api::review.review.create', 'api::review.review.myReviews',
-          'plugin::users-permissions.user.findOne', 'plugin::users-permissions.user.update'
+          'plugin::users-permissions.user.findOne', 'plugin::users-permissions.user.update',
+          'api::newsletter-campaign.newsletter-campaign.create', 'api::newsletter-campaign.newsletter-campaign.find', 'api::newsletter-campaign.newsletter-campaign.findOne'
         ];
 
         if (publicRole) {

@@ -297,40 +297,35 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                 // (First due date validated prior to creation)
 
                 // Map configs to installment steps using percentage on PRICE ONLY
-                // If evenly divisible, use clean division; otherwise percentage-based
                 const numInstallments = resolvedConfigs.length;
-                const isEvenlyDivisible = totalPriceOnly % numInstallments === 0;
+                let usedSum = 0;
 
-                if (isEvenlyDivisible) {
-                    const evenAmount = totalPriceOnly / numInstallments;
-                    for (let i = 0; i < resolvedConfigs.length; i++) {
-                        const cfg = resolvedConfigs[i];
-                        const dueDateStr = cfg.resolvedDueDate ? cfg.resolvedDueDate.toISOString().split('T')[0] : null;
-                        paymentSteps.push({
-                            name: cfg.name || `Rata ${i + 1} di ${numInstallments}`,
-                            amount: evenAmount,
-                            dueDate: dueDateStr,
-                            status: 'pending',
-                        });
+                for (let i = 0; i < resolvedConfigs.length; i++) {
+                    const cfg = resolvedConfigs[i];
+                    const cfgAmountPerPerson = Number(cfg.amount) || 0;
+                    const isLast = i === resolvedConfigs.length - 1;
+
+                    const remainingBalance = Math.round((totalPriceOnly - usedSum) * 100) / 100;
+                    let stepAmount = 0;
+
+                    if (isLast) {
+                        stepAmount = Math.max(0, remainingBalance);
+                    } else {
+                        stepAmount = Math.max(0, Math.round((cfgAmountPerPerson * participantsCount) * 100) / 100);
+                        if (stepAmount > remainingBalance) {
+                            stepAmount = remainingBalance;
+                        }
                     }
-                } else {
-                    let usedSum = 0;
-                    for (let i = 0; i < resolvedConfigs.length; i++) {
-                        const cfg = resolvedConfigs[i];
-                        const percentage = Number(cfg.percentage) || 0;
-                        const isLast = i === resolvedConfigs.length - 1;
-                        const stepAmount = isLast
-                            ? Math.round((totalPriceOnly - usedSum) * 100) / 100
-                            : Math.round((totalPriceOnly * percentage / 100) * 100) / 100;
-                        if (!isLast) usedSum += stepAmount;
-                        const dueDateStr = cfg.resolvedDueDate ? cfg.resolvedDueDate.toISOString().split('T')[0] : null;
-                        paymentSteps.push({
-                            name: cfg.name || `Rata ${i + 1} di ${numInstallments}`,
-                            amount: stepAmount,
-                            dueDate: dueDateStr,
-                            status: 'pending',
-                        });
-                    }
+
+                    usedSum += stepAmount;
+
+                    const dueDateStr = cfg.resolvedDueDate ? cfg.resolvedDueDate.toISOString().split('T')[0] : null;
+                    paymentSteps.push({
+                        name: cfg.name || `Rata ${i + 1} di ${numInstallments}`,
+                        amount: stepAmount,
+                        dueDate: dueDateStr,
+                        status: 'pending',
+                    });
                 }
             } else {
                 // --- Fallback: equal-split installments on price only ---
