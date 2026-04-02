@@ -396,7 +396,7 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             console.log(`[Create Booking] Invoice requested: ${hasRequestedInvoice}`);
 
             const sessionOptions: Stripe.Checkout.SessionCreateParams = {
-                payment_method_types: ['card'],
+                payment_method_types: ['card', 'paypal', 'klarna'],
                 line_items: [
                     {
                         price_data: {
@@ -521,7 +521,7 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
         // 4. Create Stripe session
         try {
             const sessionOptions: Stripe.Checkout.SessionCreateParams = {
-                payment_method_types: ['card'],
+                payment_method_types: ['card', 'paypal', 'klarna'],
                 line_items: [
                     {
                         price_data: {
