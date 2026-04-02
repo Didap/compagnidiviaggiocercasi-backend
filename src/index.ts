@@ -17,7 +17,7 @@ export default {
         const bookings = await strapi.documents('api::booking.booking').findMany({
           filters: {
             offer: { documentId: offerDocId },
-            status: 'confirmed',
+            bookingStatus: 'confirmed',
           },
           populate: ['participants'],
           status: 'draft',
