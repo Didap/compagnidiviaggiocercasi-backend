@@ -10,8 +10,11 @@ import Stripe from 'stripe';
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
 
-export default factories.createCoreController('api::booking.booking', ({ strapi }) => ({
-    // Seat management is handled by lifecycles.ts (afterUpdate hook)
+export default factories.createCoreController('api::booking.booking', ({ strapi }) => {
+    const baseUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+
+    return {
+        // Seat management is handled by lifecycles.ts (afterUpdate hook)
     // No custom update override needed
 
     async create(ctx) {
@@ -409,9 +412,9 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                 ],
                 mode: 'payment',
                 success_url: guestJwt
-                    ? `${process.env.FRONTEND_URL || 'http://localhost:5173'}/prenotazione/successo?session_id={CHECKOUT_SESSION_ID}&guest_jwt=${guestJwt}`
-                    : `${process.env.FRONTEND_URL || 'http://localhost:5173'}/prenotazione/successo?session_id={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/prenotazione/annullato?offer_id=${offer.documentId}`,
+                    ? `${baseUrl}/prenotazione/successo?session_id={CHECKOUT_SESSION_ID}&guest_jwt=${guestJwt}`
+                    : `${baseUrl}/prenotazione/successo?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${baseUrl}/prenotazione/annullato?offer_id=${offer.documentId}`,
                 metadata: {
                     booking_id: bookingDocId,
                     offer_id: offer.documentId,
@@ -533,8 +536,8 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                     },
                 ],
                 mode: 'payment',
-                success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/profilo?success=true`,
-                cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/profilo`,
+                success_url: `${baseUrl}/profilo?success=true`,
+                cancel_url: `${baseUrl}/profilo`,
                 metadata: {
                     booking_id: bookingDocId,
                     offer_id: offer.documentId,
@@ -620,4 +623,4 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
 
         return ctx.notFound('Template not found. Available: ' + Object.keys(templates).join(', '));
     },
-}));
+}}));
