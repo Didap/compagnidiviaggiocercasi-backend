@@ -396,7 +396,6 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             console.log(`[Create Booking] Invoice requested: ${hasRequestedInvoice}`);
 
             const sessionOptions: Stripe.Checkout.SessionCreateParams = {
-                payment_method_types: ['card', 'paypal', 'klarna'],
                 line_items: [
                     {
                         price_data: {
@@ -454,9 +453,9 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                     ...(guestJwt ? { guestJwt } : {}),
                 },
             };
-        } catch (error) {
+        } catch (error: any) {
             console.error('Stripe Session Error:', error);
-            return ctx.internalServerError('Could not create Stripe session.');
+            return ctx.internalServerError(`Could not create Stripe session: ${error.message || 'Unknown error'}`);
         }
     },
 
@@ -521,7 +520,6 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
         // 4. Create Stripe session
         try {
             const sessionOptions: Stripe.Checkout.SessionCreateParams = {
-                payment_method_types: ['card', 'paypal', 'klarna'],
                 line_items: [
                     {
                         price_data: {
@@ -566,9 +564,9 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             });
 
             return { checkoutUrl: session.url };
-        } catch (error) {
+        } catch (error: any) {
             console.error('[PaymentSession] Stripe Error:', error);
-            return ctx.internalServerError('Could not create payment session');
+            return ctx.internalServerError(`Could not create payment session: ${error.message || 'Unknown error'}`);
         }
     },
 
