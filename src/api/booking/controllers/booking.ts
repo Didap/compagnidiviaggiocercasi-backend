@@ -623,4 +623,4 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
 
         return ctx.notFound('Template not found. Available: ' + Object.keys(templates).join(', '));
     },
-}}));
+}});
