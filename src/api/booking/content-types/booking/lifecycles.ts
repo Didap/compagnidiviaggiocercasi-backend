@@ -1,82 +1,69 @@
 import emailService from '../../services/email';
 
-async function syncOfferSeatsAndParticipants(offerDocumentId: string, strapi: any) {
-    if (!offerDocumentId) return;
+async function adjustOfferOccupiedSeats(offerDocumentId: string, delta: number, strapi: any) {
+    if (!offerDocumentId || delta === 0) return;
 
-    // 1. Fetch all pending and confirmed bookings for this offer
-    const activeBookings = await strapi.documents('api::booking.booking').findMany({
-        filters: {
-            offer: { documentId: offerDocumentId },
-            bookingStatus: { $in: ['pending', 'confirmed'] },
-        },
-        populate: ['participants', 'user'],
-    });
-
-    // 2. Calculate absolute occupied seats
-    const totalOccupied = activeBookings.reduce((sum: number, b: any) => {
-        const count = (Array.isArray(b.participants) && b.participants.length > 0)
-            ? b.participants.length
-            : 1;
-        return sum + count;
-    }, 0);
-
-    // 3. Collect all unique user IDs from these active bookings
-    const activeUserIds = activeBookings
-        .map((b: any) => b.user?.documentId || b.user?.id)
-        .filter((id: any) => id != null);
-
-    // Convert to Set for uniqueness
-    const uniqueUserIds = [...new Set(activeUserIds)];
-
-    // 4. Update the Offer
-    const freshOffer = await strapi.documents('api::offer.offer').findOne({
+    const offer = await strapi.documents('api::offer.offer').findOne({
         documentId: offerDocumentId,
+        fields: ['occupiedSeats', 'maxParticipants']
     });
 
-    if (!freshOffer) return;
+    if (!offer) return;
 
-    console.log(`[Booking Sync] Syncing offer ${offerDocumentId}: occupiedSeats = ${totalOccupied}, unique users = ${uniqueUserIds.length}`);
+    const current = Number(offer.occupiedSeats || 0);
+    const newTotal = Math.max(0, current + delta); // Allow values above max if admin wants it, but at least 0
 
-    await strapi.documents('api::offer.offer').update({
-        documentId: offerDocumentId,
-        data: {
-            occupiedSeats: Math.min(totalOccupied, freshOffer.maxParticipants),
-            participants: uniqueUserIds,
-        },
-    });
+    console.log(`[Booking Delta] Adjusting offer ${offerDocumentId}: ${current} -> ${newTotal} (delta: ${delta})`);
 
-    // 5. Publish to ensure changes are visible on frontend
-    await strapi.documents('api::offer.offer').publish({
-        documentId: offerDocumentId,
-    });
+    try {
+        await strapi.documents('api::offer.offer').update({
+            documentId: offerDocumentId,
+            data: {
+                occupiedSeats: newTotal,
+            },
+        });
+    } catch (err: any) {
+        console.error(`[Booking Delta] Update failed: ${err.message}`);
+    }
 }
 
 export default {
     async afterCreate(event: any) {
         const { result } = event;
 
-        // Fetch the full booking
+        // Fetch the full booking to get the offer and participants
         const booking = await strapi.documents('api::booking.booking').findOne({
             documentId: result.documentId,
-            populate: ['offer'],
+            populate: ['offer', 'participants'],
         });
 
         if (!booking || !booking.offer) return;
 
-        // Perform idempotent sync
-        await syncOfferSeatsAndParticipants(booking.offer.documentId, strapi);
+        // Only count if confirmed (manual admin create)
+        if (booking.bookingStatus === 'confirmed') {
+            const count = (Array.isArray(booking.participants) && booking.participants.length > 0)
+                ? booking.participants.length
+                : 1;
+            await adjustOfferOccupiedSeats(booking.offer.documentId, count, strapi);
+        }
     },
 
     async beforeUpdate(event: any) {
-        const requestedStatus = event.params?.data?.bookingStatus;
-        if (requestedStatus) {
-            const documentId = event.params?.documentId || event.params?.where?.documentId;
-            if (documentId) {
-                const oldBooking = await strapi.documents('api::booking.booking').findOne({
-                    documentId,
-                });
+        const { params } = event;
+        const documentId = params?.documentId || params?.where?.documentId;
+
+        if (documentId) {
+            const oldBooking = await strapi.documents('api::booking.booking').findOne({
+                documentId,
+                populate: ['participants'],
+            });
+
+            if (oldBooking) {
                 event.state = event.state || {};
-                event.state.oldStatus = oldBooking?.bookingStatus;
+                event.state.oldStatus = oldBooking.bookingStatus;
+                event.state.oldCount = (Array.isArray(oldBooking.participants) && oldBooking.participants.length > 0)
+                    ? oldBooking.participants.length
+                    : 1;
             }
         }
     },
@@ -84,43 +71,48 @@ export default {
     async afterUpdate(event: any) {
         const { result, params, state } = event;
 
-        const requestedStatus = params?.data?.bookingStatus;
-        if (!requestedStatus) return; // status wasn't changed in this update
-
+        // 1. Handle Seat Delta
+        const requestedStatus = result.bookingStatus;
         const oldStatus = state?.oldStatus;
+        const oldCount = state?.oldCount || 0;
 
-        // Fetch the full booking
         const booking = await strapi.documents('api::booking.booking').findOne({
             documentId: result.documentId,
-            populate: ['offer', 'offer.trip', 'user', 'paymentSteps'],
+            populate: ['offer', 'offer.trip', 'user', 'paymentSteps', 'participants'],
         });
 
-        if (!booking || !booking.offer) return;
+        if (booking && booking.offer) {
+            const newCount = (Array.isArray((booking as any).participants) && (booking as any).participants.length > 0)
+                ? (booking as any).participants.length
+                : 1;
 
-        // If status changed to/from a state that affects capacity, sync!
-        if (oldStatus && oldStatus !== requestedStatus) {
-            if (
-                ['pending', 'confirmed'].includes(oldStatus) ||
-                ['pending', 'confirmed'].includes(requestedStatus)
-            ) {
-                await syncOfferSeatsAndParticipants(booking.offer.documentId, strapi);
+            const wasActive = oldStatus === 'confirmed';
+            const isActive = requestedStatus === 'confirmed';
+
+            let delta = 0;
+            if (!wasActive && isActive) {
+                delta = newCount;
+            } else if (wasActive && !isActive) {
+                delta = -oldCount;
+            } else if (wasActive && isActive && newCount !== oldCount) {
+                delta = newCount - oldCount;
+            }
+
+            if (delta !== 0) {
+                await adjustOfferOccupiedSeats(booking.offer.documentId, delta, strapi);
             }
         }
 
         // ─── Email Notifications ─────────────────────────────────
+        if (!booking || !booking.offer) return;
         const user = (booking as any).user;
         if (!user?.email) return;
 
         // Prevent duplicate emails if state did not explicitly transition
         if (oldStatus === requestedStatus) return;
 
-        // We need participantsCount for the email
-        const fullBookingForEmail = await strapi.documents('api::booking.booking').findOne({
-            documentId: result.documentId,
-            populate: ['participants'],
-        });
-        const participantsCount = (Array.isArray((fullBookingForEmail as any).participants) && (fullBookingForEmail as any).participants.length > 0)
-            ? (fullBookingForEmail as any).participants.length
+        const participantsCount = (Array.isArray((booking as any).participants) && (booking as any).participants.length > 0)
+            ? (booking as any).participants.length
             : 1;
 
         const emailData = {
@@ -145,6 +137,27 @@ export default {
             }
         } catch (err: any) {
             console.error(`[Booking Lifecycle] Email error: ${err.message}`);
+        }
+    },
+
+    async beforeDelete(event: any) {
+        const { params } = event;
+        const documentId = params?.documentId || params?.where?.documentId;
+
+        if (documentId) {
+            const booking = await strapi.documents('api::booking.booking').findOne({
+                documentId,
+                populate: ['offer', 'participants'],
+            });
+
+            if (booking && booking.offer && booking.bookingStatus === 'confirmed') {
+                const count = (Array.isArray(booking.participants) && booking.participants.length > 0)
+                    ? booking.participants.length
+                    : 1;
+                
+                // Subtract seats before deletion
+                await adjustOfferOccupiedSeats(booking.offer.documentId, -count, strapi);
+            }
         }
     },
 };

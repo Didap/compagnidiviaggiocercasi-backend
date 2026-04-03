@@ -439,7 +439,7 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     singularName: 'booking';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
     address: Schema.Attribute.String;
@@ -595,7 +595,7 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
     singularName: 'offer';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
     allowInstallments: Schema.Attribute.Boolean &

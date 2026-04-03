@@ -55,8 +55,9 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                     const start = new Date(offerCheck.startDate);
                     start.setHours(0, 0, 0, 0);
                     const diffDays = Math.ceil((start.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                    if (diffDays < 30) {
-                        return ctx.badRequest('Le prenotazioni per questo viaggio sono chiuse (meno di 30 giorni alla partenza).');
+                    const daysBeforeClose = typeof (offerCheck as any).daysBeforeClose === 'number' ? (offerCheck as any).daysBeforeClose : 30;
+                    if (diffDays < daysBeforeClose) {
+                        return ctx.badRequest(`Le prenotazioni per questo viaggio sono chiuse (meno di ${daysBeforeClose} giorni alla partenza).`);
                     }
                 }
 
@@ -385,10 +386,7 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             } as any,
         });
 
-        // Publish the booking so it's not stuck in draft/modified
-        await strapi.documents('api::booking.booking').publish({
-            documentId: bookingDocId,
-        });
+        // The booking is now automatically public since Draft & Publish is disabled
 
         // 5. Create Stripe Checkout Session for the FIRST step only
         try {
