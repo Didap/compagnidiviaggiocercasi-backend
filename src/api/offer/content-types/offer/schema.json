@@ -77,6 +77,10 @@
     "daysBeforeClose": {
       "type": "integer",
       "default": 0
+    },
+    "inEvidenza": {
+      "type": "boolean",
+      "default": false
     }
   }
 }

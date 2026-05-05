@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+
 export default {
   register() { },
 
@@ -193,6 +195,17 @@ export default {
     strapi.db.lifecycles.subscribe({
       models: ['api::newsletter-registration.newsletter-registration'],
 
+      async beforeCreate(event) {
+        const { data } = event.params;
+        if (!data) return;
+        if (!data.unsubscribeToken) {
+          data.unsubscribeToken = randomUUID();
+        }
+        if (data.subscribed === undefined || data.subscribed === null) {
+          data.subscribed = true;
+        }
+      },
+
       async afterCreate(event) {
         const { result } = event;
         try {
@@ -278,6 +291,7 @@ export default {
           'api::post.post.find', 'api::post.post.findOne',
           'api::review.review.find', 'api::review.review.findOne',
           'api::newsletter-registration.newsletter-registration.create', // Public newsletter
+          'api::newsletter-registration.newsletter-registration.unsubscribe', // Public unsubscribe via email link
           'api::contact-message.contact-message.create', // Public contact form
           'api::booking.booking.create', // Public guest checkout
           'plugin::upload.content-api.find', // Images
@@ -290,6 +304,7 @@ export default {
           'api::booking.booking.create', 'api::booking.booking.find', 'api::booking.booking.findOne', 'api::booking.booking.update', 'api::booking.booking.createPaymentSession',
           'api::trip-proposal.trip-proposal.create', 'api::trip-proposal.trip-proposal.find', 'api::trip-proposal.trip-proposal.findOne',
           'api::review.review.create', 'api::review.review.myReviews',
+          'api::newsletter-registration.newsletter-registration.unsubscribeMe',
           'plugin::users-permissions.user.findOne', 'plugin::users-permissions.user.update'
         ];
 
@@ -312,6 +327,68 @@ export default {
       }
     };
 
+    // Idempotent: ensures unsubscribe permissions exist on already-seeded deployments.
+    const ensureUnsubscribePermissions = async () => {
+      try {
+        const roles = await strapi.documents('plugin::users-permissions.role').findMany({
+          filters: { type: { $in: ['authenticated', 'public'] } }
+        });
+        const authenticatedRole = roles.find((r: any) => r.type === 'authenticated');
+        const publicRole = roles.find((r: any) => r.type === 'public');
+
+        const ensure = async (roleId: number, action: string) => {
+          const existing = await strapi.db.query('plugin::users-permissions.permission').findOne({
+            where: { action, role: roleId }
+          });
+          if (!existing) {
+            await strapi.db.query('plugin::users-permissions.permission').create({
+              data: { action, role: roleId }
+            });
+            console.log(`[Bootstrap] Added permission ${action} to role ${roleId}`);
+          }
+        };
+
+        if (publicRole) {
+          await ensure(publicRole.id, 'api::newsletter-registration.newsletter-registration.unsubscribe');
+        }
+        if (authenticatedRole) {
+          await ensure(authenticatedRole.id, 'api::newsletter-registration.newsletter-registration.unsubscribeMe');
+        }
+      } catch (err: any) {
+        console.warn('[Bootstrap] Failed to ensure unsubscribe permissions:', err.message);
+      }
+    };
+
+    // Backfill unsubscribeToken/subscribed on existing newsletter-registration rows.
+    const backfillNewsletterTokens = async () => {
+      try {
+        const store = strapi.store({ type: 'core', name: 'seed' });
+        const alreadyBackfilled = await store.get({ key: 'newsletterUnsubscribeBackfilled' });
+        if (alreadyBackfilled) return;
+
+        const regs = await strapi.db
+          .query('api::newsletter-registration.newsletter-registration')
+          .findMany({ where: { $or: [{ unsubscribeToken: { $null: true } }, { unsubscribeToken: '' }] } });
+
+        for (const r of regs) {
+          await strapi.db
+            .query('api::newsletter-registration.newsletter-registration')
+            .update({
+              where: { id: r.id },
+              data: {
+                unsubscribeToken: randomUUID(),
+                subscribed: r.subscribed ?? true,
+              },
+            });
+        }
+
+        await store.set({ key: 'newsletterUnsubscribeBackfilled', value: true });
+        console.log(`[Backfill] Newsletter: backfilled ${regs.length} registrations.`);
+      } catch (err: any) {
+        console.error('[Backfill] Newsletter token backfill failed:', err.message);
+      }
+    };
+
     // Run seed only once (first deploy), after 10s delay
     setTimeout(async () => {
       try {
@@ -326,6 +403,9 @@ export default {
         } else {
           console.log('[Seed] Permissions already seeded. Skipping.');
         }
+
+        await ensureUnsubscribePermissions();
+        await backfillNewsletterTokens();
       } catch (err: any) {
         console.error('[Seed] Error during permission seeding:', err.message);
       }

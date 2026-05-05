@@ -16,6 +16,16 @@
             "type": "email",
             "required": true,
             "unique": true
+        },
+        "unsubscribeToken": {
+            "type": "string",
+            "private": true,
+            "unique": true
+        },
+        "subscribed": {
+            "type": "boolean",
+            "default": true,
+            "required": true
         }
     }
 }
