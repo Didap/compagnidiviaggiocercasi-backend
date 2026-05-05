@@ -1,0 +1,38 @@
+{
+    "kind": "collectionType",
+    "collectionName": "newsletter_campaigns",
+    "info": {
+        "singularName": "newsletter-campaign",
+        "pluralName": "newsletter-campaigns",
+        "displayName": "Newsletter Campaign",
+        "description": "Email campaigns to send to subscribers"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "attributes": {
+        "subject": {
+            "type": "string",
+            "required": true
+        },
+        "content": {
+            "type": "richtext",
+            "required": true
+        },
+        "sendNow": {
+            "type": "boolean",
+            "default": false
+        },
+        "isSent": {
+            "type": "boolean",
+            "default": false
+        },
+        "sentAt": {
+            "type": "datetime"
+        },
+        "totalSubscribers": {
+            "type": "integer",
+            "default": 0
+        }
+    }
+}

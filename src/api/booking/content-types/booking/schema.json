@@ -8,7 +8,7 @@
         "description": "User bookings for trip offers"
     },
     "options": {
-        "draftAndPublish": true
+        "draftAndPublish": false
     },
     "pluginOptions": {},
     "attributes": {

@@ -10,8 +10,11 @@ import Stripe from 'stripe';
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
 
-export default factories.createCoreController('api::booking.booking', ({ strapi }) => ({
-    // Seat management is handled by lifecycles.ts (afterUpdate hook)
+export default factories.createCoreController('api::booking.booking', ({ strapi }) => {
+    const baseUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+
+    return {
+        // Seat management is handled by lifecycles.ts (afterUpdate hook)
     // No custom update override needed
 
     async create(ctx) {
@@ -52,8 +55,9 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                     const start = new Date(offerCheck.startDate);
                     start.setHours(0, 0, 0, 0);
                     const diffDays = Math.ceil((start.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                    if (diffDays < 30) {
-                        return ctx.badRequest('Le prenotazioni per questo viaggio sono chiuse (meno di 30 giorni alla partenza).');
+                    const daysBeforeClose = typeof (offerCheck as any).daysBeforeClose === 'number' ? (offerCheck as any).daysBeforeClose : 30;
+                    if (diffDays < daysBeforeClose) {
+                        return ctx.badRequest(`Le prenotazioni per questo viaggio sono chiuse (meno di ${daysBeforeClose} giorni alla partenza).`);
                     }
                 }
 
@@ -248,7 +252,8 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
         const totalPricePerPerson = Number(offer.price);
         const depositPerPerson = Number(offer.depositPrice);
         const tripTitle = offer.trip?.title || 'Viaggio';
-        const totalPrice = (totalPricePerPerson + depositPerPerson) * participantsCount;
+        // price is now the TOTAL price; depositPrice is included in it
+        const totalPrice = totalPricePerPerson * participantsCount;
         const totalDeposit = depositPerPerson * participantsCount;
 
         // (Booking deadline validated prior to creation)
@@ -267,8 +272,8 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             ];
         } else if (paymentOption === 'installments' && offer.allowInstallments) {
             const configs = offer.installmentConfigs;
-            // Installments apply only to the price (excluding deposit)
-            const totalPriceOnly = totalPricePerPerson * participantsCount;
+            // Installments apply to the balance (total price minus deposit)
+            const totalPriceOnly = (totalPricePerPerson - depositPerPerson) * participantsCount;
 
             // Step 0: Acconto (deposit) — always paid immediately
             paymentSteps.push({
@@ -296,40 +301,35 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                 // (First due date validated prior to creation)
 
                 // Map configs to installment steps using percentage on PRICE ONLY
-                // If evenly divisible, use clean division; otherwise percentage-based
                 const numInstallments = resolvedConfigs.length;
-                const isEvenlyDivisible = totalPriceOnly % numInstallments === 0;
+                let usedSum = 0;
 
-                if (isEvenlyDivisible) {
-                    const evenAmount = totalPriceOnly / numInstallments;
-                    for (let i = 0; i < resolvedConfigs.length; i++) {
-                        const cfg = resolvedConfigs[i];
-                        const dueDateStr = cfg.resolvedDueDate ? cfg.resolvedDueDate.toISOString().split('T')[0] : null;
-                        paymentSteps.push({
-                            name: cfg.name || `Rata ${i + 1} di ${numInstallments}`,
-                            amount: evenAmount,
-                            dueDate: dueDateStr,
-                            status: 'pending',
-                        });
+                for (let i = 0; i < resolvedConfigs.length; i++) {
+                    const cfg = resolvedConfigs[i];
+                    const cfgAmountPerPerson = Number(cfg.amount) || 0;
+                    const isLast = i === resolvedConfigs.length - 1;
+
+                    const remainingBalance = Math.round((totalPriceOnly - usedSum) * 100) / 100;
+                    let stepAmount = 0;
+
+                    if (isLast) {
+                        stepAmount = Math.max(0, remainingBalance);
+                    } else {
+                        stepAmount = Math.max(0, Math.round((cfgAmountPerPerson * participantsCount) * 100) / 100);
+                        if (stepAmount > remainingBalance) {
+                            stepAmount = remainingBalance;
+                        }
                     }
-                } else {
-                    let usedSum = 0;
-                    for (let i = 0; i < resolvedConfigs.length; i++) {
-                        const cfg = resolvedConfigs[i];
-                        const percentage = Number(cfg.percentage) || 0;
-                        const isLast = i === resolvedConfigs.length - 1;
-                        const stepAmount = isLast
-                            ? Math.round((totalPriceOnly - usedSum) * 100) / 100
-                            : Math.round((totalPriceOnly * percentage / 100) * 100) / 100;
-                        if (!isLast) usedSum += stepAmount;
-                        const dueDateStr = cfg.resolvedDueDate ? cfg.resolvedDueDate.toISOString().split('T')[0] : null;
-                        paymentSteps.push({
-                            name: cfg.name || `Rata ${i + 1} di ${numInstallments}`,
-                            amount: stepAmount,
-                            dueDate: dueDateStr,
-                            status: 'pending',
-                        });
-                    }
+
+                    usedSum += stepAmount;
+
+                    const dueDateStr = cfg.resolvedDueDate ? cfg.resolvedDueDate.toISOString().split('T')[0] : null;
+                    paymentSteps.push({
+                        name: cfg.name || `Rata ${i + 1} di ${numInstallments}`,
+                        amount: stepAmount,
+                        dueDate: dueDateStr,
+                        status: 'pending',
+                    });
                 }
             } else {
                 // --- Fallback: equal-split installments on price only ---
@@ -386,10 +386,7 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             } as any,
         });
 
-        // Publish the booking so it's not stuck in draft/modified
-        await strapi.documents('api::booking.booking').publish({
-            documentId: bookingDocId,
-        });
+        // The booking is now automatically public since Draft & Publish is disabled
 
         // 5. Create Stripe Checkout Session for the FIRST step only
         try {
@@ -397,7 +394,6 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             console.log(`[Create Booking] Invoice requested: ${hasRequestedInvoice}`);
 
             const sessionOptions: Stripe.Checkout.SessionCreateParams = {
-                payment_method_types: ['card'],
                 line_items: [
                     {
                         price_data: {
@@ -413,9 +409,9 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                 ],
                 mode: 'payment',
                 success_url: guestJwt
-                    ? `${process.env.FRONTEND_URL || 'http://localhost:5173'}/prenotazione/successo?session_id={CHECKOUT_SESSION_ID}&guest_jwt=${guestJwt}`
-                    : `${process.env.FRONTEND_URL || 'http://localhost:5173'}/prenotazione/successo?session_id={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/prenotazione/annullato?offer_id=${offer.documentId}`,
+                    ? `${baseUrl}/prenotazione/successo?session_id={CHECKOUT_SESSION_ID}&guest_jwt=${guestJwt}`
+                    : `${baseUrl}/prenotazione/successo?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${baseUrl}/prenotazione/annullato?offer_id=${offer.documentId}`,
                 metadata: {
                     booking_id: bookingDocId,
                     offer_id: offer.documentId,
@@ -455,9 +451,9 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                     ...(guestJwt ? { guestJwt } : {}),
                 },
             };
-        } catch (error) {
+        } catch (error: any) {
             console.error('Stripe Session Error:', error);
-            return ctx.internalServerError('Could not create Stripe session.');
+            return ctx.internalServerError(`Could not create Stripe session: ${error.message || 'Unknown error'}`);
         }
     },
 
@@ -522,7 +518,6 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
         // 4. Create Stripe session
         try {
             const sessionOptions: Stripe.Checkout.SessionCreateParams = {
-                payment_method_types: ['card'],
                 line_items: [
                     {
                         price_data: {
@@ -537,8 +532,8 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
                     },
                 ],
                 mode: 'payment',
-                success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/profilo?success=true`,
-                cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/profilo`,
+                success_url: `${baseUrl}/profilo?success=true`,
+                cancel_url: `${baseUrl}/profilo`,
                 metadata: {
                     booking_id: bookingDocId,
                     offer_id: offer.documentId,
@@ -567,9 +562,9 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
             });
 
             return { checkoutUrl: session.url };
-        } catch (error) {
+        } catch (error: any) {
             console.error('[PaymentSession] Stripe Error:', error);
-            return ctx.internalServerError('Could not create payment session');
+            return ctx.internalServerError(`Could not create payment session: ${error.message || 'Unknown error'}`);
         }
     },
 
@@ -624,4 +619,4 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
 
         return ctx.notFound('Template not found. Available: ' + Object.keys(templates).join(', '));
     },
-}));
+}});

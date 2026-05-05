@@ -8,7 +8,7 @@
     "description": "Offerte viaggio con date e prezzi specifici"
   },
   "options": {
-    "draftAndPublish": true
+    "draftAndPublish": false
   },
   "pluginOptions": {},
   "attributes": {

@@ -439,7 +439,7 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     singularName: 'booking';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
     address: Schema.Attribute.String;
@@ -519,6 +519,41 @@ export interface ApiContactMessageContactMessage
   };
 }
 
+export interface ApiNewsletterCampaignNewsletterCampaign
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'newsletter_campaigns';
+  info: {
+    description: 'Email campaigns to send to subscribers';
+    displayName: 'Newsletter Campaign';
+    pluralName: 'newsletter-campaigns';
+    singularName: 'newsletter-campaign';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    content: Schema.Attribute.RichText & Schema.Attribute.Required;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    isSent: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::newsletter-campaign.newsletter-campaign'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    sendNow: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    sentAt: Schema.Attribute.DateTime;
+    subject: Schema.Attribute.String & Schema.Attribute.Required;
+    totalSubscribers: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiNewsletterRegistrationNewsletterRegistration
   extends Struct.CollectionTypeSchema {
   collectionName: 'newsletter_registrations';
@@ -560,7 +595,7 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
     singularName: 'offer';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
     allowInstallments: Schema.Attribute.Boolean &
@@ -735,6 +770,9 @@ export interface ApiTripTrip extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    attivo: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1287,6 +1325,7 @@ declare module '@strapi/strapi' {
       'admin::user': AdminUser;
       'api::booking.booking': ApiBookingBooking;
       'api::contact-message.contact-message': ApiContactMessageContactMessage;
+      'api::newsletter-campaign.newsletter-campaign': ApiNewsletterCampaignNewsletterCampaign;
       'api::newsletter-registration.newsletter-registration': ApiNewsletterRegistrationNewsletterRegistration;
       'api::offer.offer': ApiOfferOffer;
       'api::post.post': ApiPostPost;

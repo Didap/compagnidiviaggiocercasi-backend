@@ -129,7 +129,6 @@ export default ({ strapi }: { strapi: any }) => ({
                                     paymentSteps,
                                 }
                             });
-                            await strapi.documents('api::booking.booking').publish({ documentId: bookingId as string });
                             return ctx.badRequest('Overbooking detected. Booking cancelled.');
                         }
 
@@ -142,7 +141,6 @@ export default ({ strapi }: { strapi: any }) => ({
                                 paymentSteps,
                             },
                         });
-                        await strapi.documents('api::booking.booking').publish({ documentId: bookingId as string });
                         console.log('[Stripe Webhook] Booking confirmed and published');
                     } else {
                         // Booking already confirmed (subsequent installment/balance payment)
@@ -153,7 +151,6 @@ export default ({ strapi }: { strapi: any }) => ({
                                 paymentSteps,
                             },
                         });
-                        await strapi.documents('api::booking.booking').publish({ documentId: bookingId as string });
                     }
 
                 } catch (error: any) {
