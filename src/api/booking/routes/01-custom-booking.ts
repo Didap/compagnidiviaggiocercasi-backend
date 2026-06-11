@@ -5,6 +5,15 @@
 export default {
     routes: [
         {
+            method: 'GET',
+            path: '/bookings/mine',
+            handler: 'booking.myBookings',
+            config: {
+                policies: [],
+                middlewares: [],
+            },
+        },
+        {
             method: 'POST',
             path: '/bookings/:id/payment-session',
             handler: 'booking.createPaymentSession',

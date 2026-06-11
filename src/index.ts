@@ -115,7 +115,9 @@ export default {
 
         const authenticatedPermissions = [
           ...publicPermissions,
-          'api::booking.booking.create', 'api::booking.booking.find', 'api::booking.booking.findOne', 'api::booking.booking.update', 'api::booking.booking.createPaymentSession',
+          // No booking.find/findOne/update here: customers only see their own
+          // bookings via myBookings; staff operates through the admin role.
+          'api::booking.booking.create', 'api::booking.booking.myBookings', 'api::booking.booking.createPaymentSession',
           'api::trip-proposal.trip-proposal.create', 'api::trip-proposal.trip-proposal.find', 'api::trip-proposal.trip-proposal.findOne',
           'api::review.review.create', 'api::review.review.myReviews',
           'api::newsletter-registration.newsletter-registration.unsubscribeMe',
@@ -172,6 +174,54 @@ export default {
         }
       } catch (err: any) {
         console.warn('[Bootstrap] Failed to ensure unsubscribe permissions:', err.message);
+      }
+    };
+
+    // Idempotent: customers reach their bookings only through myBookings.
+    // Grants the new permission and revokes the blanket find/findOne/update
+    // that let any logged-in user read/edit everyone's bookings.
+    const ensureOwnBookingsPermissions = async () => {
+      try {
+        const roles = await strapi.documents('plugin::users-permissions.role').findMany({
+          filters: { type: { $in: ['authenticated', 'public'] } }
+        });
+        const authenticatedRole = roles.find((r: any) => r.type === 'authenticated');
+        const publicRole = roles.find((r: any) => r.type === 'public');
+
+        if (authenticatedRole) {
+          const grant = 'api::booking.booking.myBookings';
+          const existing = await strapi.db.query('plugin::users-permissions.permission').findOne({
+            where: { action: grant, role: authenticatedRole.id }
+          });
+          if (!existing) {
+            await strapi.db.query('plugin::users-permissions.permission').create({
+              data: { action: grant, role: authenticatedRole.id }
+            });
+            console.log(`[Bootstrap] Granted ${grant} to authenticated role`);
+          }
+        }
+
+        const revokedActions = [
+          'api::booking.booking.find',
+          'api::booking.booking.findOne',
+          'api::booking.booking.update',
+        ];
+        for (const role of [authenticatedRole, publicRole]) {
+          if (!role) continue;
+          for (const action of revokedActions) {
+            const existing = await strapi.db.query('plugin::users-permissions.permission').findOne({
+              where: { action, role: role.id }
+            });
+            if (existing) {
+              await strapi.db.query('plugin::users-permissions.permission').delete({
+                where: { id: existing.id }
+              });
+              console.log(`[Bootstrap] Revoked ${action} from role "${role.name}"`);
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn('[Bootstrap] Failed to ensure own-bookings permissions:', err.message);
       }
     };
 
@@ -273,6 +323,7 @@ export default {
         }
 
         await ensureUnsubscribePermissions();
+        await ensureOwnBookingsPermissions();
         await restrictNewsletterCampaignToAdmin();
         await backfillNewsletterTokens();
       } catch (err: any) {

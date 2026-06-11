@@ -458,6 +458,32 @@ export default factories.createCoreController('api::booking.booking', ({ strapi 
     },
 
     /**
+     * GET /api/bookings/mine
+     * Returns the authenticated user's bookings, filtered server-side.
+     * (The content API rejects filters on user relations — "Invalid key user" —
+     * so the profile page cannot use GET /api/bookings with query filters.)
+     */
+    async myBookings(ctx) {
+        const currentUser = ctx.state.user;
+        if (!currentUser) {
+            return ctx.unauthorized('You must be logged in.');
+        }
+
+        const bookings = await strapi.documents('api::booking.booking').findMany({
+            filters: { user: { id: currentUser.id } },
+            populate: {
+                participants: true,
+                offer: { populate: { trip: { populate: '*' }, itinerary: true } },
+                paymentSteps: true,
+            },
+            sort: 'createdAt:desc',
+            limit: 200,
+        });
+
+        return { data: bookings };
+    },
+
+    /**
      * POST /api/bookings/:id/payment-session
      * Creates a Stripe Checkout Session for a specific pending payment step.
      */
