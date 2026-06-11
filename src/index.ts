@@ -120,7 +120,8 @@ export default {
           'api::review.review.create', 'api::review.review.myReviews',
           'api::newsletter-registration.newsletter-registration.unsubscribeMe',
           'plugin::users-permissions.user.findOne', 'plugin::users-permissions.user.update',
-          'api::newsletter-campaign.newsletter-campaign.create', 'api::newsletter-campaign.newsletter-campaign.find', 'api::newsletter-campaign.newsletter-campaign.findOne'
+          // newsletter-campaign permissions are reserved to the admin role
+          // (see restrictNewsletterCampaignToAdmin below)
         ];
 
         if (publicRole) {
@@ -174,6 +175,58 @@ export default {
       }
     };
 
+    // Idempotent: newsletter campaigns (mass email blasts) must be manageable
+    // only by the admin role, never by any logged-in user. Removes the
+    // permissions from public/authenticated (also on already-seeded deploys)
+    // and grants them to the users-permissions role named/typed 'admin'.
+    const restrictNewsletterCampaignToAdmin = async () => {
+      const campaignActions = [
+        'api::newsletter-campaign.newsletter-campaign.create',
+        'api::newsletter-campaign.newsletter-campaign.find',
+        'api::newsletter-campaign.newsletter-campaign.findOne',
+      ];
+
+      try {
+        const roles = await strapi.db.query('plugin::users-permissions.role').findMany();
+        const adminRole = roles.find((r: any) =>
+          r.type?.toLowerCase() === 'admin' || r.name?.toLowerCase() === 'admin');
+        const restrictedRoles = roles.filter((r: any) =>
+          ['authenticated', 'public'].includes(r.type) );
+
+        for (const role of restrictedRoles) {
+          for (const action of campaignActions) {
+            const existing = await strapi.db.query('plugin::users-permissions.permission').findOne({
+              where: { action, role: role.id }
+            });
+            if (existing) {
+              await strapi.db.query('plugin::users-permissions.permission').delete({
+                where: { id: existing.id }
+              });
+              console.log(`[Bootstrap] Removed permission ${action} from role "${role.name}"`);
+            }
+          }
+        }
+
+        if (adminRole) {
+          for (const action of campaignActions) {
+            const existing = await strapi.db.query('plugin::users-permissions.permission').findOne({
+              where: { action, role: adminRole.id }
+            });
+            if (!existing) {
+              await strapi.db.query('plugin::users-permissions.permission').create({
+                data: { action, role: adminRole.id }
+              });
+              console.log(`[Bootstrap] Granted permission ${action} to role "${adminRole.name}"`);
+            }
+          }
+        } else {
+          console.warn('[Bootstrap] No users-permissions role named/typed "admin" found: newsletter-campaign API is now admin-panel only.');
+        }
+      } catch (err: any) {
+        console.warn('[Bootstrap] Failed to restrict newsletter-campaign permissions:', err.message);
+      }
+    };
+
     // Backfill unsubscribeToken/subscribed on existing newsletter-registration rows.
     const backfillNewsletterTokens = async () => {
       try {
@@ -220,6 +273,7 @@ export default {
         }
 
         await ensureUnsubscribePermissions();
+        await restrictNewsletterCampaignToAdmin();
         await backfillNewsletterTokens();
       } catch (err: any) {
         console.error('[Seed] Error during permission seeding:', err.message);

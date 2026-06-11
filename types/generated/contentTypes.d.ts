@@ -580,6 +580,12 @@ export interface ApiNewsletterRegistrationNewsletterRegistration
     > &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
+    subscribed: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    unsubscribeToken: Schema.Attribute.String &
+      Schema.Attribute.Private &
+      Schema.Attribute.Unique;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -609,6 +615,7 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
     daysBeforeClose: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
     depositPrice: Schema.Attribute.Decimal & Schema.Attribute.Required;
     endDate: Schema.Attribute.Date & Schema.Attribute.Required;
+    inEvidenza: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     installmentConfigs: Schema.Attribute.Component<
       'booking.installment-config',
       true

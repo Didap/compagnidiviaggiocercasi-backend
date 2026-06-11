@@ -14,8 +14,9 @@ const processNewsletterSend = async (event: any, isCreate = false) => {
         });
 
         try {
-            // 2. Fetch all subscribers from the newsletter-registration collection
+            // 2. Fetch active subscribers from the newsletter-registration collection
             const subscribers = await strapi.documents('api::newsletter-registration.newsletter-registration').findMany({
+                filters: { subscribed: true },
                 limit: 10000,
             });
 
@@ -146,6 +147,7 @@ const processNewsletterSend = async (event: any, isCreate = false) => {
                             </div>
                             <div class="footer">
                                 <p>Hai ricevuto questa email perché ti sei iscritto alla newsletter di Compagni di Viaggio Cercasi.</p>
+                                <p style="margin-top: 10px;"><a href="{{UNSUBSCRIBE_URL}}" style="color: #64748b; text-decoration: underline;">Disiscriviti dalla newsletter</a></p>
                                 <p style="margin-top: 10px;">&copy; ${new Date().getFullYear()} Compagni di Viaggio Cercasi SRLS. Tutti i diritti riservati.</p>
                             </div>
                         </div>
@@ -159,13 +161,16 @@ const processNewsletterSend = async (event: any, isCreate = false) => {
                 let successCount = 0;
                 let errorCount = 0;
 
+                const backendUrl = (process.env.BACKEND_URL || 'http://localhost:1337').replace(/\/$/, '');
+
                 for (const sub of subscribers) {
                     try {
+                        const unsubscribeUrl = `${backendUrl}/api/newsletter-registrations/unsubscribe?token=${sub.unsubscribeToken || ''}`;
                         const emailResult = await strapi.plugins['email'].services.email.send({
                             to: sub.email,
                             from: process.env.RESEND_FROM_EMAIL || 'info@compagnidiviaggiocercasi.it',
                             subject: result.subject,
-                            html: templateHtml,
+                            html: templateHtml.replace('{{UNSUBSCRIBE_URL}}', unsubscribeUrl),
                             text: 'Per visualizzare correttamente questa email, utilizza un client di posta che supporti HTML.',
                         });
                         strapi.log.info(`[Newsletter] Success sending to ${sub.email}: ${JSON.stringify(emailResult)}`);

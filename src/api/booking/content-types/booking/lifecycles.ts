@@ -50,21 +50,22 @@ export default {
 
     async beforeUpdate(event: any) {
         const { params } = event;
-        const documentId = params?.documentId || params?.where?.documentId;
 
-        if (documentId) {
-            const oldBooking = await strapi.documents('api::booking.booking').findOne({
-                documentId,
-                populate: ['participants'],
-            });
+        // DB-level lifecycles address rows as { where: { id } } — documentId is
+        // never present here, so resolve the previous state from the row itself.
+        const oldBooking = params?.where
+            ? await strapi.db.query('api::booking.booking').findOne({
+                where: params.where,
+                populate: { participants: true },
+            })
+            : null;
 
-            if (oldBooking) {
-                event.state = event.state || {};
-                event.state.oldStatus = oldBooking.bookingStatus;
-                event.state.oldCount = (Array.isArray(oldBooking.participants) && oldBooking.participants.length > 0)
-                    ? oldBooking.participants.length
-                    : 1;
-            }
+        if (oldBooking) {
+            event.state = event.state || {};
+            event.state.oldStatus = oldBooking.bookingStatus;
+            event.state.oldCount = (Array.isArray(oldBooking.participants) && oldBooking.participants.length > 0)
+                ? oldBooking.participants.length
+                : 1;
         }
     },
 
@@ -81,7 +82,9 @@ export default {
             populate: ['offer', 'offer.trip', 'user', 'paymentSteps', 'participants'],
         });
 
-        if (booking && booking.offer) {
+        // If the previous state could not be resolved, do nothing: adjusting
+        // seats or emailing on an unknown transition causes duplicates.
+        if (booking && booking.offer && oldStatus !== undefined) {
             const newCount = (Array.isArray((booking as any).participants) && (booking as any).participants.length > 0)
                 ? (booking as any).participants.length
                 : 1;
@@ -108,8 +111,9 @@ export default {
         const user = (booking as any).user;
         if (!user?.email) return;
 
-        // Prevent duplicate emails if state did not explicitly transition
-        if (oldStatus === requestedStatus) return;
+        // Send only on a known status transition; with unknown previous state,
+        // sending would duplicate the email on every save (fail closed).
+        if (!oldStatus || oldStatus === requestedStatus) return;
 
         const participantsCount = (Array.isArray((booking as any).participants) && (booking as any).participants.length > 0)
             ? (booking as any).participants.length
@@ -142,19 +146,19 @@ export default {
 
     async beforeDelete(event: any) {
         const { params } = event;
-        const documentId = params?.documentId || params?.where?.documentId;
 
-        if (documentId) {
-            const booking = await strapi.documents('api::booking.booking').findOne({
-                documentId,
-                populate: ['offer', 'participants'],
+        // Same as beforeUpdate: db lifecycles receive { where: { id } }, never documentId.
+        if (params?.where) {
+            const booking = await strapi.db.query('api::booking.booking').findOne({
+                where: params.where,
+                populate: { offer: true, participants: true },
             });
 
             if (booking && booking.offer && booking.bookingStatus === 'confirmed') {
                 const count = (Array.isArray(booking.participants) && booking.participants.length > 0)
                     ? booking.participants.length
                     : 1;
-                
+
                 // Subtract seats before deletion
                 await adjustOfferOccupiedSeats(booking.offer.documentId, -count, strapi);
             }

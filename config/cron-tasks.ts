@@ -1,20 +1,23 @@
 /**
  * Cron Tasks
- * 
+ *
  * Scheduled email reminders for:
  * - Installment payments (7 days before + same day)
  * - Trip preparation series (30, 14, 7, 1 day before departure)
- * 
+ *
  * Runs every day at 09:00 Europe/Rome time.
  */
 
 export default {
     /**
-     * Daily reminder job — runs at 09:00 Italian time
-     * Cron: minute(0) hour(9) day(*) month(*) weekday(*)
+     * Daily reminder job — runs at 09:00 Italian time.
+     * NOTE: with the `{ task, options }` shape the object key is only the job NAME;
+     * the schedule MUST live in options.rule, otherwise node-schedule falls back
+     * to an empty rule that fires every minute.
      */
-    '0 9 * * *': {
+    dailyEmailReminders: {
         options: {
+            rule: '0 9 * * *',
             tz: 'Europe/Rome',
         },
         async task({ strapi }: { strapi: any }) {
@@ -23,6 +26,16 @@ export default {
             const emailService = require('../src/api/booking/services/email').default;
             const today = new Date();
             today.setHours(0, 0, 0, 0);
+
+            // Persistent log of already-sent reminders: survives restarts and
+            // protects against re-fires (schedule mistakes, date edits, multiple instances).
+            const store = strapi.store({ type: 'plugin', name: 'email-reminders' });
+            const sendOnce = async (key: string, send: () => Promise<void>) => {
+                const already = await store.get({ key });
+                if (already) return;
+                await send();
+                await store.set({ key, value: new Date().toISOString() });
+            };
 
             // ─── 1. Installment Reminders ────────────────────────────
             try {
@@ -63,19 +76,23 @@ export default {
                         const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
 
                         if (diffDays === 7) {
-                            console.log(`[Cron] Sending 7-day installment reminder to ${user.email} for "${step.name}"`);
-                            await emailService.sendInstallmentReminder(
-                                strapi, user.email, emailData,
-                                step.name, Number(step.amount), step.dueDate, false
-                            );
+                            await sendOnce(`step:${booking.documentId}:${step.name}:${step.dueDate}:pre`, async () => {
+                                console.log(`[Cron] Sending 7-day installment reminder to ${user.email} for "${step.name}"`);
+                                await emailService.sendInstallmentReminder(
+                                    strapi, user.email, emailData,
+                                    step.name, Number(step.amount), step.dueDate, false
+                                );
+                            });
                         }
 
                         if (diffDays === 0) {
-                            console.log(`[Cron] Sending same-day installment reminder to ${user.email} for "${step.name}"`);
-                            await emailService.sendInstallmentReminder(
-                                strapi, user.email, emailData,
-                                step.name, Number(step.amount), step.dueDate, true
-                            );
+                            await sendOnce(`step:${booking.documentId}:${step.name}:${step.dueDate}:due`, async () => {
+                                console.log(`[Cron] Sending same-day installment reminder to ${user.email} for "${step.name}"`);
+                                await emailService.sendInstallmentReminder(
+                                    strapi, user.email, emailData,
+                                    step.name, Number(step.amount), step.dueDate, true
+                                );
+                            });
                         }
                     }
 
@@ -88,10 +105,14 @@ export default {
 
                         const reminderDays = [30, 14, 7, 1];
                         if (reminderDays.includes(daysUntilTrip)) {
-                            console.log(`[Cron] Sending ${daysUntilTrip}-day trip reminder to ${user.email} for "${emailData.tripTitle}"`);
-                            await emailService.sendTripReminder(
-                                strapi, user.email, emailData, daysUntilTrip
-                            );
+                            // Keyed by user+offer (not booking) so duplicate bookings
+                            // on the same offer never double the trip reminders.
+                            await sendOnce(`trip:${user.email}:${offer.documentId}:${daysUntilTrip}`, async () => {
+                                console.log(`[Cron] Sending ${daysUntilTrip}-day trip reminder to ${user.email} for "${emailData.tripTitle}"`);
+                                await emailService.sendTripReminder(
+                                    strapi, user.email, emailData, daysUntilTrip
+                                );
+                            });
                         }
                     }
                 }

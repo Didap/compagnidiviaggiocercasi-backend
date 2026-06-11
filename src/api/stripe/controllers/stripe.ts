@@ -79,6 +79,7 @@ export default ({ strapi }: { strapi: any }) => ({
                     const paymentSteps = (booking as any).paymentSteps || [];
 
 
+                    let paidStep: any = null;
                     if (paymentSteps[paymentStepIndex]) {
                         // Idempotency: skip if already paid (Stripe may send duplicate webhooks)
                         if (paymentSteps[paymentStepIndex].status === 'paid') {
@@ -88,34 +89,36 @@ export default ({ strapi }: { strapi: any }) => ({
 
                         paymentSteps[paymentStepIndex].status = 'paid';
                         paymentSteps[paymentStepIndex].stripeSessionId = session.id;
+                        paidStep = paymentSteps[paymentStepIndex];
                         console.log(`[Stripe Webhook] Marked paymentStep[${paymentStepIndex}] "${paymentSteps[paymentStepIndex].name}" as PAID`);
-
-                        // Send payment receipt email
-                        const bookingUser = (booking as any).user;
-                        if (bookingUser?.email) {
-                            const bookingOffer = (booking as any).offer;
-                            const emailData = {
-                                userName: bookingUser.firstName || bookingUser.username || 'Viaggiatore',
-                                tripTitle: bookingOffer?.trip?.title || 'Viaggio',
-                                destination: bookingOffer?.trip?.destination || '',
-                                startDate: bookingOffer?.startDate,
-                                endDate: bookingOffer?.endDate,
-                                participantsCount,
-                                totalPrice: Number((booking as any).totalPrice || 0),
-                                depositPrice: Number((booking as any).depositPrice || 0),
-                                paymentSteps,
-                            };
-                            const paidStep = paymentSteps[paymentStepIndex];
-                            try {
-                                await emailService.sendPaymentReceipt(
-                                    strapi, bookingUser.email, emailData,
-                                    paidStep.name, Number(paidStep.amount)
-                                );
-                            } catch (emailErr: any) {
-                                console.error('[Stripe Webhook] Payment receipt email failed:', emailErr.message);
-                            }
-                        }
                     }
+
+                    // Receipt is sent only AFTER the paid status is persisted below:
+                    // sending first would re-send it on every Stripe retry if the update fails.
+                    const sendReceipt = async () => {
+                        const bookingUser = (booking as any).user;
+                        if (!paidStep || !bookingUser?.email) return;
+                        const bookingOffer = (booking as any).offer;
+                        const emailData = {
+                            userName: bookingUser.firstName || bookingUser.username || 'Viaggiatore',
+                            tripTitle: bookingOffer?.trip?.title || 'Viaggio',
+                            destination: bookingOffer?.trip?.destination || '',
+                            startDate: bookingOffer?.startDate,
+                            endDate: bookingOffer?.endDate,
+                            participantsCount,
+                            totalPrice: Number((booking as any).totalPrice || 0),
+                            depositPrice: Number((booking as any).depositPrice || 0),
+                            paymentSteps,
+                        };
+                        try {
+                            await emailService.sendPaymentReceipt(
+                                strapi, bookingUser.email, emailData,
+                                paidStep.name, Number(paidStep.amount)
+                            );
+                        } catch (emailErr: any) {
+                            console.error('[Stripe Webhook] Payment receipt email failed:', emailErr.message);
+                        }
+                    };
 
                     // 4. Check availability and update booking
                     if ((booking as any).bookingStatus !== 'confirmed') {
@@ -129,6 +132,8 @@ export default ({ strapi }: { strapi: any }) => ({
                                     paymentSteps,
                                 }
                             });
+                            // The customer was charged: receipt is still due (refund handled separately)
+                            await sendReceipt();
                             return ctx.badRequest('Overbooking detected. Booking cancelled.');
                         }
 
@@ -152,6 +157,8 @@ export default ({ strapi }: { strapi: any }) => ({
                             },
                         });
                     }
+
+                    await sendReceipt();
 
                 } catch (error: any) {
                     console.error('[Stripe Webhook] Internal Error:', error);
