@@ -2,7 +2,7 @@ export default ({ env }) => ({
     'users-permissions': {
         config: {
             register: {
-                allowedFields: ['firstName', 'lastName', 'phone', 'birthday'],
+                allowedFields: ['firstName', 'lastName', 'phone', 'birthday', 'codiceFiscale', 'address', 'city', 'zip', 'province'],
             },
         },
     },
