@@ -277,6 +277,40 @@ export default {
       }
     };
 
+    // Idempotent: le route custom di moderazione recensioni (publish/unpublish)
+    // sono riservate al ruolo users-permissions 'admin', come le campagne newsletter.
+    const grantReviewModerationToAdmin = async () => {
+      const moderationActions = [
+        'api::review.review.publish',
+        'api::review.review.unpublish',
+      ];
+
+      try {
+        const roles = await strapi.db.query('plugin::users-permissions.role').findMany();
+        const adminRole = roles.find((r: any) =>
+          r.type?.toLowerCase() === 'admin' || r.name?.toLowerCase() === 'admin');
+
+        if (!adminRole) {
+          console.warn('[Bootstrap] No users-permissions role named/typed "admin" found: review publish/unpublish not granted.');
+          return;
+        }
+
+        for (const action of moderationActions) {
+          const existing = await strapi.db.query('plugin::users-permissions.permission').findOne({
+            where: { action, role: adminRole.id }
+          });
+          if (!existing) {
+            await strapi.db.query('plugin::users-permissions.permission').create({
+              data: { action, role: adminRole.id }
+            });
+            console.log(`[Bootstrap] Granted permission ${action} to role "${adminRole.name}"`);
+          }
+        }
+      } catch (err: any) {
+        console.warn('[Bootstrap] Failed to grant review moderation permissions:', err.message);
+      }
+    };
+
     // Backfill unsubscribeToken/subscribed on existing newsletter-registration rows.
     const backfillNewsletterTokens = async () => {
       try {
@@ -325,6 +359,7 @@ export default {
         await ensureUnsubscribePermissions();
         await ensureOwnBookingsPermissions();
         await restrictNewsletterCampaignToAdmin();
+        await grantReviewModerationToAdmin();
         await backfillNewsletterTokens();
       } catch (err: any) {
         console.error('[Seed] Error during permission seeding:', err.message);

@@ -132,5 +132,27 @@ export default factories.createCoreController('api::review.review', ({ strapi })
         } catch (err: any) {
             ctx.internalServerError('Error fetching user reviews');
         }
+    },
+
+    // Moderazione dalla dashboard: il content API v5 non espone publish/unpublish,
+    // quindi li esponiamo come route custom riservate al ruolo admin.
+    async publish(ctx) {
+        const { id } = ctx.params;
+        try {
+            const doc = await strapi.documents('api::review.review').publish({ documentId: id });
+            return { data: doc };
+        } catch (err: any) {
+            return ctx.notFound('Recensione non trovata.');
+        }
+    },
+
+    async unpublish(ctx) {
+        const { id } = ctx.params;
+        try {
+            const doc = await strapi.documents('api::review.review').unpublish({ documentId: id });
+            return { data: doc };
+        } catch (err: any) {
+            return ctx.notFound('Recensione non trovata.');
+        }
     }
 }));
